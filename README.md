@@ -4,13 +4,12 @@ AI-powered personal life administration platform. It acts as an intelligent case
 
 ## Current status
 
-Early scaffolding only. So far the repo includes:
+Phases completed so far:
 
-- Docker Compose Postgres with **pgvector** (`pg17`)
-- Local env config (`.env` / `.env.example`)
-- A small DB connectivity check script (`check_db.py`)
+1. **Local Postgres** — Docker Compose with PostgreSQL 17 + pgvector; connection smoke test
+2. **Knowledge schema** — SQLAlchemy 2.x models + Alembic migration for government knowledge collection (`jurisdictions`, `authorities`, `sources`, `documents`, `document_versions`, `document_jurisdictions`)
 
-No application API or frontend yet.
+No crawler, API, or frontend yet.
 
 ## Prerequisites
 
@@ -44,7 +43,7 @@ POSTGRES_PORT=5432
 DATABASE_URL=postgresql+psycopg://lifepilot:your_password_here@localhost:5432/lifepilot
 ```
 
-If the password contains special characters (e.g. `!`, `@`, `#`), URL-encode them in `DATABASE_URL` (e.g. `!` → `%21`).
+If the password contains special characters (e.g. `!`, `@`, `#`), URL-encode them in `DATABASE_URL` (e.g. `!` → `%21`). Unencoded `!` can cause connection hangs.
 
 ### 3. Create a virtual environment and install deps
 
@@ -53,7 +52,7 @@ If the password contains special characters (e.g. `!`, `@`, `#`), URL-encode the
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install python-dotenv SQLAlchemy "psycopg[binary]"
+pip install -r requirements.txt
 ```
 
 **macOS / Linux:**
@@ -61,35 +60,49 @@ pip install python-dotenv SQLAlchemy "psycopg[binary]"
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install python-dotenv SQLAlchemy "psycopg[binary]"
+pip install -r requirements.txt
 ```
 
 ### 4. Start PostgreSQL
 
-From the repo root (Compose loads variables from `.env`):
-
 ```bash
 docker compose up -d
-```
-
-Check that the container is healthy:
-
-```bash
 docker compose ps
 ```
 
 ### 5. Verify the database connection
 
-With the venv activated:
-
 ```bash
 python check_db.py
 ```
 
-Expected output:
+Expected:
 
 ```text
 PostgreSQL connection successful: 1
+```
+
+### 6. Apply database migrations
+
+```powershell
+# Windows PowerShell
+$env:PYTHONPATH = "backend"
+alembic upgrade head
+```
+
+```bash
+# macOS / Linux
+export PYTHONPATH=backend
+alembic upgrade head
+```
+
+Or: `python scripts/run_migrate.py`
+
+### 7. Run tests
+
+```powershell
+$env:PYTHONPATH = "backend"
+pytest -v
 ```
 
 ## Useful commands
@@ -101,18 +114,51 @@ PostgreSQL connection successful: 1
 | `docker compose down -v` | Stop and **delete** the Postgres data volume |
 | `docker compose logs -f postgres` | Tail Postgres logs |
 | `python check_db.py` | Smoke-test SQLAlchemy → Postgres |
+| `alembic upgrade head` | Apply migrations (`PYTHONPATH=backend`) |
+| `alembic current` | Show current migration revision |
+| `pytest -v` | Run schema/constraint tests |
+
+### Inspect tables in Postgres
+
+```bash
+docker compose exec -T postgres psql -U lifepilot -d lifepilot
+```
+
+```sql
+\dt
+\d documents
+\d document_versions
+```
 
 ## Project layout (so far)
 
 ```text
 LifePilot/
-├── compose.yaml      # Postgres + pgvector service
-├── .env.example      # Shared env template (safe to commit)
-├── .env              # Local secrets (gitignored)
-├── check_db.py       # DB connectivity smoke test
+├── compose.yaml              # Postgres + pgvector
+├── .env.example              # Env template (safe to commit)
+├── .env                      # Local secrets (gitignored)
+├── check_db.py               # DB connectivity smoke test
+├── requirements.txt
+├── alembic.ini
+├── alembic/                  # Migrations
+├── backend/lifepilot/db/     # SQLAlchemy models + session
+├── tests/                    # Schema constraint tests
+├── scripts/run_migrate.py    # Optional migrate helper
+├── pytest.ini
 ├── .gitignore
 └── README.md
 ```
+
+## Knowledge schema (overview)
+
+| Table | Purpose |
+|---|---|
+| `jurisdictions` | Countries, regions, municipalities, EU (supranational), etc. |
+| `authorities` | Publishing government bodies |
+| `sources` | Curated seed URLs + approval status |
+| `documents` | One row per normalized URL / language variant |
+| `document_versions` | Historical raw snapshots; at most one `is_current` per document |
+| `document_jurisdictions` | Explicit applicability (never inferred from hierarchy alone) |
 
 ## Stack (planned)
 
@@ -126,4 +172,4 @@ LifePilot/
 
 ## Next steps
 
-Foundational backend architecture, then incremental feature work toward the UK graduate → employment MVP.
+Crawler / document ingestion, then extracted text and RAG layers—built incrementally on this schema.
