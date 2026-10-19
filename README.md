@@ -9,9 +9,11 @@ Phases completed so far:
 1. **Local Postgres** — Docker Compose with PostgreSQL 17 + pgvector; connection smoke test
 2. **Knowledge schema** — SQLAlchemy 2.x models + Alembic migration for government knowledge collection
 3. **Source registry** — curated official seed URLs (GB, DE, NL, CA, EU), idempotent importer, HTTP reachability checks, explicit approval workflow
-4. **Dry-run crawl planner** — allowlist + robots.txt + rate-policy plan for approved seeds (no page downloads)
+4. **Dry-run crawl planner** — allowlist + robots.txt + rate-policy plan for approved seeds
+5. **Seed HTML fetcher** — fetch approved seed URLs only; dry-run by default
+6. **Bounded link discovery** — extract in-allowlist links from stored HTML; fetch HTML only (PDFs listed, not downloaded)
 
-No document downloader, link crawler, API, or frontend yet.
+No open crawl, PDF/DOCX ingestion, extraction/RAG, API, or frontend yet.
 
 ## Prerequisites
 
@@ -130,7 +132,42 @@ python scripts/plan_crawl.py
 
 This checks each **approved** source seed against its allowlist and `robots.txt`, then prints what a future fetcher would do. It does **not** download government pages or write `documents` rows (it may fetch `/robots.txt` only).
 
-### 9. Run tests
+### 9. Fetch approved seed HTML
+
+Dry-run (default — preflight only, no page download):
+
+```powershell
+python scripts/fetch_seeds.py
+python scripts/fetch_seeds.py --source-id 86
+```
+
+Persist HTML + `documents` / `document_versions` (explicit opt-in):
+
+```powershell
+python scripts/fetch_seeds.py --persist --source-id 86
+python scripts/fetch_seeds.py --persist
+```
+
+Files are stored under `data/raw/documents/{document_id}/v{n}.html` (gitignored). Only HTML is accepted.
+
+### 10. Bounded link discovery (from stored HTML)
+
+Requires a previously persisted seed document. Dry-run (default — list only):
+
+```powershell
+python scripts/discover_links.py --source-id 86
+python scripts/discover_links.py --document-id 99
+```
+
+Persist in-scope HTML links (capped per run; PDFs are reported but not downloaded):
+
+```powershell
+python scripts/discover_links.py --source-id 86 --persist
+```
+
+Discovery stays inside each source’s allowlist. It does not spider the open web.
+
+### 11. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -150,7 +187,11 @@ pytest -v
 | `alembic current` | Show current migration revision |
 | `python scripts/import_seed_sources.py` | Upsert curated official seed sources |
 | `python scripts/plan_crawl.py` | Dry-run crawl plan for approved sources |
-| `pytest -v` | Run schema + registry + planner tests |
+| `python scripts/fetch_seeds.py` | Dry-run seed fetch preflight |
+| `python scripts/fetch_seeds.py --persist` | Download/store approved seed HTML |
+| `python scripts/discover_links.py --source-id N` | Dry-run link discovery from stored HTML |
+| `python scripts/discover_links.py --source-id N --persist` | Fetch in-scope discovered HTML |
+| `pytest -v` | Run schema + registry + crawl tests |
 
 ### Inspect tables in Postgres
 
@@ -179,12 +220,15 @@ LifePilot/
 ├── backend/lifepilot/
 │   ├── db/                      # SQLAlchemy models + session
 │   ├── registry/                # Seed registry (import, verify, review, URL scope)
-│   └── crawl/                   # Dry-run planner + robots/rate policy
-├── tests/                       # Schema + registry + planner tests
+│   └── crawl/                   # Planner, seed fetch, bounded link discovery
+├── data/                        # Fetched HTML (gitignored; created on persist)
+├── tests/                       # Schema + registry + crawl tests
 ├── scripts/
 │   ├── run_migrate.py
 │   ├── import_seed_sources.py
-│   └── plan_crawl.py
+│   ├── plan_crawl.py
+│   ├── fetch_seeds.py
+│   └── discover_links.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -203,10 +247,11 @@ LifePilot/
 
 ## Source registry notes
 
-- Seed metadata is separate from downloaded documents (no crawl/download in this phase)
+- Seed metadata is separate from downloaded documents
 - Allowlist patterns use a narrow path scope (`https://host/path*`); matching requires exact scheme/host and genuine path descendants — not naive string prefixes
-- HTTP verification uses a transparent LifePilot user-agent and does not impersonate a browser
-- Successful HTTP checks are **not** content authenticity and do **not** grant crawl permission; check `robots.txt`, terms, and rate limits before implementing a crawler
+- HTTP verification and fetching use a transparent LifePilot user-agent and do not impersonate a browser
+- Successful HTTP checks are **not** content authenticity; `robots.txt`, terms, and rate limits still apply
+- Link discovery is bounded: only in-allowlist URLs from stored HTML; PDFs are listed but not fetched yet
 
 ## Stack (planned)
 
@@ -220,4 +265,4 @@ LifePilot/
 
 ## Next steps
 
-Single-page fetcher for planned seed URLs only (store `documents` + `document_versions`), then bounded link discovery inside allowlists, then extraction/RAG.
+PDF fetch for in-scope discovered links, then text extraction and RAG—built incrementally.

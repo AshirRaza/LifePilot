@@ -16,12 +16,20 @@ from lifepilot.crawl.planner import (
 )
 from lifepilot.crawl.policy import CrawlPolicy
 from lifepilot.crawl.robots import check_robots, effective_crawl_delay, robots_url_for
-from lifepilot.db.models import Authority, Document, Jurisdiction, Source
+from lifepilot.db.models import (
+    Authority,
+    Document,
+    DocumentVersion,
+    Jurisdiction,
+    Source,
+)
 from lifepilot.registry.importer import import_seed_sources
 from lifepilot.registry.review import set_source_review_status
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentVersion))
+    session.execute(delete(Document))
     session.execute(delete(Source))
     session.execute(delete(Authority))
     session.execute(delete(Jurisdiction))

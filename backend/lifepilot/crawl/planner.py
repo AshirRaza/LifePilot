@@ -71,14 +71,37 @@ class CrawlPlan:
         )
 
 
-def _load_approved_sources(session: Session) -> list[Source]:
-    return list(
-        session.scalars(
-            select(Source)
-            .where(Source.review_status == "approved")
-            .order_by(Source.id)
-        ).all()
-    )
+def _load_approved_sources(
+    session: Session,
+    *,
+    source_id: int | None = None,
+) -> list[Source]:
+    stmt = select(Source).where(Source.review_status == "approved").order_by(Source.id)
+    if source_id is not None:
+        stmt = stmt.where(Source.id == source_id)
+    return list(session.scalars(stmt).all())
+
+
+def evaluate_source(
+    source: Source,
+    policy: CrawlPolicy,
+    *,
+    client=None,
+) -> CrawlPlanEntry:
+    """Recheck approval preconditions for a single source (seed URL only)."""
+    if source.review_status != "approved":
+        return CrawlPlanEntry(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=source.seed_url or "",
+            seed_url_normalized=source.seed_url_normalized or "",
+            decision=DECISION_INVALID_SOURCE,
+            in_allowlist=False,
+            crawl_delay_seconds=None,
+            max_requests_per_host_per_minute=policy.max_requests_per_host_per_minute,
+            notes=f"source review_status={source.review_status!r}; not approved",
+        )
+    return _decide_entry(source, policy, client=client)
 
 
 def _decide_entry(
@@ -176,12 +199,11 @@ def build_crawl_plan(
     *,
     policy: CrawlPolicy | None = None,
     http_client=None,
+    source_id: int | None = None,
 ) -> CrawlPlan:
-    """Build a dry-run plan for all approved sources (seed URLs only)."""
+    """Build a dry-run plan for approved sources (seed URLs only)."""
     policy = policy or CrawlPolicy()
     plan = CrawlPlan(policy=policy)
-    for source in _load_approved_sources(session):
-        plan.entries.append(
-            _decide_entry(source, policy, client=http_client)
-        )
+    for source in _load_approved_sources(session, source_id=source_id):
+        plan.entries.append(evaluate_source(source, policy, client=http_client))
     return plan

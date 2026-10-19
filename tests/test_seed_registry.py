@@ -7,7 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import delete, func, select
 
-from lifepilot.db.models import Authority, Document, Jurisdiction, Source
+from lifepilot.db.models import (
+    Authority,
+    Document,
+    DocumentVersion,
+    Jurisdiction,
+    Source,
+)
 from lifepilot.registry.importer import (
     import_seed_sources,
     resolve_patterns_for_import,
@@ -28,6 +34,8 @@ from lifepilot.registry.verify import DEFAULT_USER_AGENT, VerificationResult, ve
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentVersion))
+    session.execute(delete(Document))
     session.execute(delete(Source))
     session.execute(delete(Authority))
     session.execute(delete(Jurisdiction))
