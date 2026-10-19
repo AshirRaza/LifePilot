@@ -9,8 +9,9 @@ Phases completed so far:
 1. **Local Postgres** — Docker Compose with PostgreSQL 17 + pgvector; connection smoke test
 2. **Knowledge schema** — SQLAlchemy 2.x models + Alembic migration for government knowledge collection
 3. **Source registry** — curated official seed URLs (GB, DE, NL, CA, EU), idempotent importer, HTTP reachability checks, explicit approval workflow
+4. **Dry-run crawl planner** — allowlist + robots.txt + rate-policy plan for approved seeds (no page downloads)
 
-No crawler, document downloader, API, or frontend yet.
+No document downloader, link crawler, API, or frontend yet.
 
 ## Prerequisites
 
@@ -120,7 +121,16 @@ python scripts/import_seed_sources.py --no-verify --set-status gb_skilled_worker
 
 Allowed statuses: `approved`, `candidate`, `rejected`. Approving requires an HTTPS seed URL and valid allowlist patterns.
 
-### 8. Run tests
+### 8. Dry-run crawl plan (approved sources only)
+
+```powershell
+$env:PYTHONPATH = "backend"
+python scripts/plan_crawl.py
+```
+
+This checks each **approved** source seed against its allowlist and `robots.txt`, then prints what a future fetcher would do. It does **not** download government pages or write `documents` rows (it may fetch `/robots.txt` only).
+
+### 9. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -139,7 +149,8 @@ pytest -v
 | `alembic upgrade head` | Apply migrations (`PYTHONPATH=backend`) |
 | `alembic current` | Show current migration revision |
 | `python scripts/import_seed_sources.py` | Upsert curated official seed sources |
-| `pytest -v` | Run schema + registry tests |
+| `python scripts/plan_crawl.py` | Dry-run crawl plan for approved sources |
+| `pytest -v` | Run schema + registry + planner tests |
 
 ### Inspect tables in Postgres
 
@@ -167,11 +178,13 @@ LifePilot/
 ├── alembic/                     # Migrations
 ├── backend/lifepilot/
 │   ├── db/                      # SQLAlchemy models + session
-│   └── registry/                # Seed registry (import, verify, review, URL scope)
-├── tests/                       # Schema + registry tests
+│   ├── registry/                # Seed registry (import, verify, review, URL scope)
+│   └── crawl/                   # Dry-run planner + robots/rate policy
+├── tests/                       # Schema + registry + planner tests
 ├── scripts/
 │   ├── run_migrate.py
-│   └── import_seed_sources.py
+│   ├── import_seed_sources.py
+│   └── plan_crawl.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -207,4 +220,4 @@ LifePilot/
 
 ## Next steps
 
-Crawler / document ingestion (respecting allowlists and site policies), then extracted text and RAG layers—built incrementally on this schema.
+Single-page fetcher for planned seed URLs only (store `documents` + `document_versions`), then bounded link discovery inside allowlists, then extraction/RAG.
