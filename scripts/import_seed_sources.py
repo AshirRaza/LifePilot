@@ -10,7 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from lifepilot.db.session import get_session_factory  # noqa: E402
-from lifepilot.registry.importer import import_seed_sources  # noqa: E402
+from lifepilot.registry.importer import (  # noqa: E402
+    import_seed_sources,
+    sync_report_review_statuses,
+)
 from lifepilot.registry.review import ReviewError, set_source_review_status  # noqa: E402
 from lifepilot.registry.seeds import SOURCES  # noqa: E402
 from lifepilot.registry.urls import normalize_url  # noqa: E402
@@ -69,6 +72,8 @@ def main() -> int:
             except ReviewError as exc:
                 raise SystemExit(f"Review failed for {key}: {exc}") from exc
 
+        # Totals must reflect explicit review operations from this command.
+        sync_report_review_statuses(session, report)
         session.commit()
 
     print("Source registry import complete.")
@@ -95,10 +100,11 @@ def main() -> int:
         if item.verification is not None:
             verify_bit = f" | {item.verification.summary}"
         err_bit = f" | error={item.error}" if item.error else ""
+        warn_bit = f" | warning={item.warning}" if item.warning else ""
         print(
             f"  - {item.key}: {item.action} "
             f"status={item.review_status} "
-            f"normalized={item.seed_url_normalized}{verify_bit}{err_bit}"
+            f"normalized={item.seed_url_normalized}{verify_bit}{err_bit}{warn_bit}"
         )
     return 0
 

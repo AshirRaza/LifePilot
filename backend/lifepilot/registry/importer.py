@@ -20,9 +20,13 @@ from lifepilot.registry.seeds import AUTHORITIES, JURISDICTIONS, SOURCES, Source
 from lifepilot.registry.urls import (
     InvalidRegistryUrlError,
     path_prefix_pattern,
+    patterns_expand_scope,
     validate_seed_and_patterns,
 )
 from lifepilot.registry.verify import VerificationResult, verify_seed_url
+
+# Reviewed statuses: crawl boundaries must not change on import.
+_REVIEWED_STATUSES = frozenset({"approved", "rejected"})
 
 
 @dataclass
@@ -34,6 +38,7 @@ class SourceImportResult:
     action: str  # created | updated | unchanged | skipped_invalid
     verification: VerificationResult | None = None
     error: str | None = None
+    warning: str | None = None
 
 
 @dataclass
@@ -83,6 +88,35 @@ def _build_notes(seed: SourceSeed) -> str:
     if seed.extra_notes:
         parts.append(seed.extra_notes)
     return " | ".join(parts)
+
+
+def resolve_patterns_for_import(
+    *,
+    review_status: str,
+    existing_patterns: list[str] | None,
+    proposed_patterns: list[str],
+) -> tuple[list[str], str | None]:
+    """Choose patterns to store; protect reviewed crawl scopes from silent changes.
+
+    Approved/rejected sources keep their existing boundaries. Candidate sources
+    may take the proposed seed patterns. Returns ``(patterns, warning_or_none)``.
+    """
+    existing = list(existing_patterns or [])
+    if review_status not in _REVIEWED_STATUSES:
+        return proposed_patterns, None
+
+    if existing == proposed_patterns:
+        return existing, None
+
+    if patterns_expand_scope(existing, proposed_patterns):
+        return existing, (
+            "refused to expand reviewed crawl scope; "
+            "existing allowed_url_patterns preserved"
+        )
+    return existing, (
+        "preserved reviewed crawl scope; "
+        "seed pattern changes ignored until explicitly approved"
+    )
 
 
 def _upsert_jurisdictions(session: Session, report: ImportReport) -> dict[str, Jurisdiction]:
@@ -225,13 +259,20 @@ def _upsert_source(
         )
 
     # Preserve explicit review decisions (approved / candidate / rejected).
+    # Never silently expand (or otherwise rewrite) reviewed crawl scopes.
+    patterns_to_store, scope_warning = resolve_patterns_for_import(
+        review_status=existing.review_status,
+        existing_patterns=list(existing.allowed_url_patterns or []),
+        proposed_patterns=patterns,
+    )
+
     changed = False
     desired = {
         "authority_id": authority.id,
         "jurisdiction_id": jurisdiction.id,
         "name": seed.name,
         "seed_url": seed.seed_url,
-        "allowed_url_patterns": patterns,
+        "allowed_url_patterns": patterns_to_store,
         "default_language": seed.language,
         "notes": notes,
     }
@@ -247,6 +288,7 @@ def _upsert_source(
         review_status=existing.review_status,
         action="updated" if changed else "unchanged",
         verification=verification,
+        warning=scope_warning,
     )
 
 
@@ -276,4 +318,19 @@ def import_seed_sources(
         report.sources.append(result)
 
     session.flush()
+    return report
+
+
+def sync_report_review_statuses(session: Session, report: ImportReport) -> ImportReport:
+    """Refresh report statuses from DB (e.g. after explicit ``--set-status``)."""
+    for item in report.sources:
+        if not item.seed_url_normalized:
+            continue
+        row = session.scalar(
+            select(Source).where(
+                Source.seed_url_normalized == item.seed_url_normalized
+            )
+        )
+        if row is not None:
+            item.review_status = row.review_status
     return report

@@ -8,13 +8,18 @@ import pytest
 from sqlalchemy import delete, func, select
 
 from lifepilot.db.models import Authority, Document, Jurisdiction, Source
-from lifepilot.registry.importer import import_seed_sources
+from lifepilot.registry.importer import (
+    import_seed_sources,
+    resolve_patterns_for_import,
+    sync_report_review_statuses,
+)
 from lifepilot.registry.review import ReviewError, set_source_review_status
 from lifepilot.registry.seeds import SOURCES
 from lifepilot.registry.urls import (
     InvalidRegistryUrlError,
     normalize_url,
     path_prefix_pattern,
+    patterns_expand_scope,
     url_matches_allowed_pattern,
     validate_http_url,
     validate_seed_and_patterns,
@@ -318,3 +323,128 @@ def test_verify_seed_url_accepts_expected_host():
     )
     assert result.ok is True
     assert result.landed_on_expected_host is True
+
+
+def test_url_scope_compares_effective_ports():
+    pattern = "https://www.gov.uk:443/skilled-worker-visa*"
+    assert url_matches_allowed_pattern(
+        "https://www.gov.uk/skilled-worker-visa", pattern
+    )
+    assert not url_matches_allowed_pattern(
+        "https://www.gov.uk:8443/skilled-worker-visa", pattern
+    )
+
+
+def test_reject_encoded_separators_traversal_and_ambiguous_paths():
+    with pytest.raises(InvalidRegistryUrlError):
+        normalize_url("https://www.gov.uk/skilled%2Fworker-visa")
+    with pytest.raises(InvalidRegistryUrlError):
+        normalize_url("https://www.gov.uk/a/../b")
+    with pytest.raises(InvalidRegistryUrlError):
+        normalize_url("https://www.gov.uk/a//b")
+    with pytest.raises(InvalidRegistryUrlError):
+        normalize_url("https://www.gov.uk/a\\b")
+    assert not url_matches_allowed_pattern(
+        "https://www.gov.uk/skilled%2Fworker-visa",
+        "https://www.gov.uk/skilled-worker-visa*",
+    )
+
+
+def test_patterns_expand_scope_detects_widening():
+    existing = ["https://ind.nl/en/residence-permits/work*"]
+    assert patterns_expand_scope(
+        existing,
+        ["https://ind.nl/en/residence-permits/work*", "https://ind.nl/en/*"],
+    )
+    assert patterns_expand_scope(existing, ["https://ind.nl/en/residence-permits/*"])
+    assert not patterns_expand_scope(
+        existing,
+        ["https://ind.nl/en/residence-permits/work/highly-skilled-migrant*"],
+    )
+
+
+def test_approved_import_refuses_silent_scope_expansion(db_session):
+    _clear_registry(db_session)
+    import_seed_sources(db_session, verify=False)
+    db_session.flush()
+    source = db_session.scalar(
+        select(Source).where(
+            Source.seed_url_normalized == "https://www.gov.uk/skilled-worker-visa"
+        )
+    )
+    assert source is not None
+    set_source_review_status(db_session, source_id=source.id, status="approved")
+    original = list(source.allowed_url_patterns)
+    db_session.flush()
+
+    expanded = ["https://www.gov.uk/*"]
+    stored, warning = resolve_patterns_for_import(
+        review_status="approved",
+        existing_patterns=original,
+        proposed_patterns=expanded,
+    )
+    assert stored == original
+    assert warning is not None
+    assert "expand" in warning
+
+    # Candidate sources may still take proposed patterns.
+    candidate_stored, candidate_warning = resolve_patterns_for_import(
+        review_status="candidate",
+        existing_patterns=original,
+        proposed_patterns=expanded,
+    )
+    assert candidate_stored == expanded
+    assert candidate_warning is None
+
+
+def test_approved_source_patterns_unchanged_across_reimport(db_session):
+    _clear_registry(db_session)
+    import_seed_sources(db_session, verify=False)
+    db_session.flush()
+    source = db_session.scalar(
+        select(Source).where(
+            Source.seed_url_normalized
+            == "https://ind.nl/en/residence-permits/work"
+        )
+    )
+    assert source is not None
+    # Simulate a previously reviewed narrow scope that differs from a wider proposal.
+    source.allowed_url_patterns = [
+        "https://ind.nl/en/residence-permits/work/highly-skilled-migrant*"
+    ]
+    set_source_review_status(db_session, source_id=source.id, status="approved")
+    db_session.flush()
+    protected = list(source.allowed_url_patterns)
+
+    report = import_seed_sources(db_session, verify=False)
+    db_session.flush()
+    db_session.refresh(source)
+
+    assert list(source.allowed_url_patterns) == protected
+    nl = next(s for s in report.sources if s.key == "nl_ind_work_permits")
+    assert nl.review_status == "approved"
+    assert nl.warning is not None
+    assert "scope" in nl.warning
+
+
+def test_report_totals_reflect_explicit_review_ops(db_session):
+    _clear_registry(db_session)
+    report = import_seed_sources(db_session, verify=False)
+    db_session.flush()
+    assert report.approved_count == 0
+    assert report.candidate_count == len(SOURCES)
+
+    source = db_session.scalar(
+        select(Source).where(
+            Source.seed_url_normalized == "https://www.gov.uk/skilled-worker-visa"
+        )
+    )
+    assert source is not None
+    set_source_review_status(db_session, source_id=source.id, status="approved")
+    db_session.flush()
+
+    sync_report_review_statuses(db_session, report)
+    assert report.approved_count == 1
+    assert report.candidate_count == len(SOURCES) - 1
+    gb = next(s for s in report.sources if s.key == "gb_skilled_worker_visa")
+    assert gb.review_status == "approved"
