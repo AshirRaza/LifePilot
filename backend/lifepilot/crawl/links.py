@@ -20,7 +20,9 @@ class ExtractedLink:
     raw_href: str
     absolute_url: str
     url_normalized: str | None
-    kind: str  # in_scope_html | in_scope_pdf | in_scope_other | out_of_scope | invalid
+    kind: str
+    # in_scope_html | in_scope_pdf | in_scope_docx | in_scope_other
+    # | out_of_scope | invalid
     reason: str = ""
 
 
@@ -46,15 +48,18 @@ def extract_raw_hrefs(html: str) -> list[str]:
 
 
 def _classify_path(url: str) -> str:
+    """Hint document type from the URL path (not authoritative for fetch)."""
     path = (urlsplit(url).path or "").lower()
     if path.endswith(".pdf"):
         return "pdf"
+    if path.endswith(".docx"):
+        return "docx"
     if path.endswith((".html", ".htm", ".xhtml")) or path.endswith("/"):
         return "html"
     # Extension-less government paths are usually HTML pages.
     if "." not in path.rsplit("/", 1)[-1]:
         return "html"
-    if path.endswith((".doc", ".docx", ".xls", ".xlsx", ".zip")):
+    if path.endswith((".doc", ".xls", ".xlsx", ".zip")):
         return "other"
     return "html"
 
@@ -100,6 +105,8 @@ def resolve_and_classify_link(
     path_kind = _classify_path(normalized)
     if path_kind == "pdf":
         kind = "in_scope_pdf"
+    elif path_kind == "docx":
+        kind = "in_scope_docx"
     elif path_kind == "other":
         kind = "in_scope_other"
     else:

@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from lifepilot.crawl.binary_fetch import fetch_binary_url
 from lifepilot.crawl.html_quality import (
     OUTCOME_BLOCKED_BY_BOT_PROTECTION,
     OUTCOME_INVALID_CONTENT,
@@ -126,6 +127,7 @@ def _get_or_create_document(
     canonical_url: str,
     url_normalized: str,
     discovery_status: str,
+    content_kind: str = "html_page",
 ) -> Document:
     """Return the document for ``url_normalized``, creating it if needed.
 
@@ -145,7 +147,7 @@ def _get_or_create_document(
         primary_source_id=source.id,
         canonical_url=canonical_url,
         url_normalized=url_normalized,
-        content_kind="html_page",
+        content_kind=content_kind,
         language=source.default_language,
         title=None,
         discovery_status=discovery_status,
@@ -195,6 +197,7 @@ def _persist_html_version(
         canonical_url=requested_url,
         url_normalized=url_normalized,
         discovery_status=discovery_status,
+        content_kind="html_page",
     )
 
     if content_matches_current(session, document.id, digest):
@@ -212,7 +215,9 @@ def _persist_html_version(
         )
 
     version_number = _next_version_number(session, document.id)
-    abs_path = version_file_path(storage_root, document.id, version_number)
+    abs_path = version_file_path(
+        storage_root, document.id, version_number, extension="html"
+    )
     rel_path = relative_storage_path(storage_root, abs_path)
 
     write_bytes_atomic(abs_path, html_body)
@@ -357,6 +362,222 @@ def fetch_html_document_url(
         content_type=html.content_type,
         http_status=html.status_code,
         final_url=html.final_url,
+        storage_root=root,
+    )
+
+
+def _persist_binary_version(
+    session: Session,
+    *,
+    source: Source,
+    requested_url: str,
+    url_normalized: str,
+    discovery_status: str,
+    content_kind: str,
+    body: bytes,
+    content_type: str | None,
+    http_status: int | None,
+    final_url: str | None,
+    storage_root: Path,
+) -> SeedFetchResult:
+    if content_kind not in {"pdf", "docx"}:
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=requested_url,
+            status=STATUS_FAILED,
+            message=f"unsupported binary content_kind={content_kind!r}",
+        )
+
+    digest = hashlib.sha256(body).hexdigest()
+    document = _get_or_create_document(
+        session,
+        source,
+        canonical_url=requested_url,
+        url_normalized=url_normalized,
+        discovery_status=discovery_status,
+        content_kind=content_kind,
+    )
+
+    if content_matches_current(session, document.id, digest):
+        session.flush()
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=requested_url,
+            status=STATUS_UNCHANGED,
+            document_id=document.id,
+            content_sha256=digest,
+            http_status=http_status,
+            final_url=final_url,
+            message="content hash matches current version; no new version created",
+        )
+
+    version_number = _next_version_number(session, document.id)
+    abs_path = version_file_path(
+        storage_root,
+        document.id,
+        version_number,
+        extension=content_kind,
+    )
+    rel_path = relative_storage_path(storage_root, abs_path)
+
+    write_bytes_atomic(abs_path, body)
+    try:
+        version = DocumentVersion(
+            document_id=document.id,
+            fetched_via_source_id=source.id,
+            version_number=version_number,
+            source_url=final_url or requested_url,
+            content_type=content_type
+            or (
+                "application/pdf"
+                if content_kind == "pdf"
+                else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            language=source.default_language,
+            retrieved_at=datetime.now(timezone.utc),
+            http_status=http_status,
+            content_sha256=digest,
+            byte_size=len(body),
+            storage_path=rel_path,
+            is_current=False,
+        )
+        session.add(version)
+        session.flush()
+        set_current_version(session, version)
+        session.flush()
+    except Exception:
+        delete_quiet(abs_path)
+        raise
+
+    return SeedFetchResult(
+        source_id=source.id,
+        source_name=source.name,
+        seed_url=requested_url,
+        status=STATUS_FETCHED_NEW_VERSION,
+        document_id=document.id,
+        version_id=version.id,
+        version_number=version_number,
+        content_sha256=digest,
+        storage_path=rel_path,
+        http_status=http_status,
+        final_url=final_url,
+        message=f"stored new {content_kind} document version",
+    )
+
+
+def fetch_binary_document_url(
+    session: Session,
+    source: Source,
+    *,
+    url: str,
+    expected_kind: str,
+    discovery_status: str = "discovered",
+    persist: bool = False,
+    policy: CrawlPolicy | None = None,
+    http_client=None,
+    storage_root: Path | str | None = None,
+    apply_rate_limit: bool = False,
+    last_host_fetch_at: dict[str, float] | None = None,
+) -> SeedFetchResult:
+    """Fetch one in-allowlist PDF/DOCX URL under an approved crawl source."""
+    policy = policy or fetcher_policy()
+    root = data_root(storage_root)
+    session.refresh(source)
+
+    if source.review_status != "approved":
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=url,
+            status=STATUS_SKIPPED,
+            message=f"source review_status={source.review_status!r}; not approved",
+        )
+
+    if expected_kind not in {"pdf", "docx"}:
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=url,
+            status=STATUS_FAILED,
+            message=f"unsupported expected_kind={expected_kind!r}",
+        )
+
+    patterns = list(source.allowed_url_patterns or [])
+    try:
+        url_normalized = normalize_url(url)
+    except InvalidRegistryUrlError as exc:
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=url,
+            status=STATUS_FAILED,
+            message=f"invalid URL: {exc}",
+        )
+
+    if not url_in_any_allowed_pattern(url_normalized, patterns):
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=url_normalized,
+            status=STATUS_SKIPPED,
+            message="URL outside approved allowlist scope",
+        )
+
+    if not persist:
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=url_normalized,
+            status=STATUS_DRY_RUN,
+            message=(
+                f"dry-run: would fetch in-scope {expected_kind}; "
+                "pass --persist to download and store"
+            ),
+        )
+
+    host = urlsplit(url_normalized).hostname or ""
+    if apply_rate_limit and last_host_fetch_at is not None and host:
+        delay = policy.default_crawl_delay_seconds
+        last = last_host_fetch_at.get(host)
+        if last is not None:
+            wait = delay - (time.monotonic() - last)
+            if wait > 0:
+                time.sleep(wait)
+
+    fetched = fetch_binary_url(
+        url_normalized,
+        expected_kind=expected_kind,
+        allowed_patterns=patterns,
+        policy=policy,
+        client=http_client,
+    )
+    if apply_rate_limit and last_host_fetch_at is not None and host:
+        last_host_fetch_at[host] = time.monotonic()
+
+    if not fetched.ok or fetched.body is None or not fetched.content_kind:
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=url_normalized,
+            status=STATUS_FAILED,
+            http_status=fetched.status_code,
+            final_url=fetched.final_url,
+            message=fetched.error or "binary fetch failed",
+        )
+
+    return _persist_binary_version(
+        session,
+        source=source,
+        requested_url=url_normalized,
+        url_normalized=url_normalized,
+        discovery_status=discovery_status,
+        content_kind=fetched.content_kind,
+        body=fetched.body,
+        content_type=fetched.content_type,
+        http_status=fetched.status_code,
+        final_url=fetched.final_url,
         storage_root=root,
     )
 

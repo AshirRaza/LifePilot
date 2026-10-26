@@ -25,14 +25,19 @@ def version_file_path(
     root: Path,
     document_id: int,
     version_number: int,
+    *,
+    extension: str = "html",
 ) -> Path:
-    """Absolute path for a document version HTML file."""
+    """Absolute path for a document version file (html/pdf/docx)."""
+    ext = extension.lstrip(".").lower() or "html"
+    if ext not in {"html", "pdf", "docx"}:
+        raise ValueError(f"unsupported storage extension: {extension!r}")
     return (
         root
         / "raw"
         / "documents"
         / str(document_id)
-        / f"v{version_number}.html"
+        / f"v{version_number}.{ext}"
     )
 
 

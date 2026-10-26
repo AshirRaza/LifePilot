@@ -37,9 +37,14 @@ class CrawlPolicy:
     request_timeout_seconds: float = 30.0
     max_response_bytes: int = 5_000_000
     max_redirects: int = 5
-    # Bounded discovery caps (Phase 4C).
+    # Bounded discovery caps (Phase 4C / 4D).
     max_discovered_links_listed: int = 200
     max_discovered_html_fetches_per_run: int = 25
+    max_discovered_binary_fetches_per_run: int = 3
+    # Binary PDF/DOCX download limits (Phase 4D).
+    max_binary_response_bytes: int = 20_000_000
+    max_docx_uncompressed_bytes: int = 80_000_000
+    binary_request_timeout_seconds: float = 60.0
 
 
 def fetcher_policy(
@@ -53,8 +58,12 @@ def fetcher_policy(
     max_redirects: int = 5,
     max_discovered_links_listed: int = 200,
     max_discovered_html_fetches_per_run: int = 25,
+    max_discovered_binary_fetches_per_run: int = 3,
+    max_binary_response_bytes: int = 20_000_000,
+    max_docx_uncompressed_bytes: int = 80_000_000,
+    binary_request_timeout_seconds: float = 60.0,
 ) -> CrawlPolicy:
-    """Policy for real HTML fetches (transparent fetcher user-agent)."""
+    """Policy for real HTML/binary fetches (transparent fetcher user-agent)."""
     return CrawlPolicy(
         user_agent=FETCHER_USER_AGENT,
         default_crawl_delay_seconds=default_crawl_delay_seconds,
@@ -66,4 +75,8 @@ def fetcher_policy(
         max_redirects=max_redirects,
         max_discovered_links_listed=max_discovered_links_listed,
         max_discovered_html_fetches_per_run=max_discovered_html_fetches_per_run,
+        max_discovered_binary_fetches_per_run=max_discovered_binary_fetches_per_run,
+        max_binary_response_bytes=max_binary_response_bytes,
+        max_docx_uncompressed_bytes=max_docx_uncompressed_bytes,
+        binary_request_timeout_seconds=binary_request_timeout_seconds,
     )

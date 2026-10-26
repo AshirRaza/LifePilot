@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 import certifi
 import httpx
 
+from lifepilot.crawl.net_safety import url_has_blocked_fetch_host
 from lifepilot.crawl.policy import CrawlPolicy
 from lifepilot.crawl.robots import check_robots
 from lifepilot.registry.urls import url_in_any_allowed_pattern
@@ -66,6 +67,14 @@ def fetch_html_seed(
     chain: list[str] = []
     try:
         for _ in range(policy.max_redirects + 1):
+            if url_has_blocked_fetch_host(current):
+                return HtmlFetchResult(
+                    ok=False,
+                    requested_url=seed_url,
+                    final_url=current,
+                    redirect_chain=chain,
+                    error="blocked host (private/loopback/metadata)",
+                )
             if not url_in_any_allowed_pattern(current, allowed_patterns):
                 return HtmlFetchResult(
                     ok=False,

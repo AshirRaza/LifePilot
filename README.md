@@ -13,8 +13,9 @@ Phases completed so far:
 5. **Seed HTML fetcher** — fetch approved seed URLs only; dry-run by default
 6. **Bounded link discovery** — extract in-allowlist links from stored HTML; fetch HTML only (PDFs listed, not downloaded)
 7. **HTML content-quality checks** — reject recognizable bot-protection / WAF interstitials (e.g. Radware) before storing versions
+8. **PDF/DOCX ingestion** — discover in-allowlist binary links from stored HTML; validate magic/OOXML; versioned raw storage (no text extraction yet)
 
-No open crawl, PDF/DOCX ingestion, extraction/RAG, API, or frontend yet.
+No open crawl, text extraction/OCR, embeddings/RAG, API, or frontend yet.
 
 ## Prerequisites
 
@@ -194,6 +195,8 @@ pytest -v
 | `python scripts/discover_links.py --source-id N --persist` | Fetch in-scope discovered HTML |
 | `python scripts/mark_document_discovery_status.py` | Explicitly exclude/include a document for discovery |
 | `python scripts/set_source_patterns.py` | Explicit allowlist change (requires `--confirm-expand` to widen) |
+| `python scripts/discover_documents.py --source-id N` | Dry-run PDF/DOCX discovery from stored HTML |
+| `python scripts/discover_documents.py --source-id N --persist` | Download/store in-scope PDF/DOCX (default max 3) |
 | `pytest -v` | Run schema + registry + crawl tests |
 
 ### Inspect tables in Postgres
@@ -233,7 +236,8 @@ LifePilot/
 │   ├── fetch_seeds.py
 │   ├── discover_links.py
 │   ├── mark_document_discovery_status.py
-│   └── set_source_patterns.py
+│   ├── set_source_patterns.py
+│   └── discover_documents.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -272,4 +276,4 @@ LifePilot/
 
 ## Next steps
 
-PDF fetch for in-scope discovered links, then text extraction and RAG—built incrementally.
+Text extraction from stored HTML/PDF/DOCX (no OCR first), then chunking/embeddings/RAG—built incrementally.

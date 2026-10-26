@@ -39,6 +39,10 @@ class DiscoveryReport:
         return [link for link in self.links if link.kind == "in_scope_pdf"]
 
     @property
+    def in_scope_docx(self) -> list[ExtractedLink]:
+        return [link for link in self.links if link.kind == "in_scope_docx"]
+
+    @property
     def out_of_scope(self) -> list[ExtractedLink]:
         return [link for link in self.links if link.kind == "out_of_scope"]
 
