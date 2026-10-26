@@ -12,6 +12,7 @@ Phases completed so far:
 4. **Dry-run crawl planner** — allowlist + robots.txt + rate-policy plan for approved seeds
 5. **Seed HTML fetcher** — fetch approved seed URLs only; dry-run by default
 6. **Bounded link discovery** — extract in-allowlist links from stored HTML; fetch HTML only (PDFs listed, not downloaded)
+7. **HTML content-quality checks** — reject recognizable bot-protection / WAF interstitials (e.g. Radware) before storing versions
 
 No open crawl, PDF/DOCX ingestion, extraction/RAG, API, or frontend yet.
 
@@ -191,6 +192,8 @@ pytest -v
 | `python scripts/fetch_seeds.py --persist` | Download/store approved seed HTML |
 | `python scripts/discover_links.py --source-id N` | Dry-run link discovery from stored HTML |
 | `python scripts/discover_links.py --source-id N --persist` | Fetch in-scope discovered HTML |
+| `python scripts/mark_document_discovery_status.py` | Explicitly exclude/include a document for discovery |
+| `python scripts/set_source_patterns.py` | Explicit allowlist change (requires `--confirm-expand` to widen) |
 | `pytest -v` | Run schema + registry + crawl tests |
 
 ### Inspect tables in Postgres
@@ -228,7 +231,9 @@ LifePilot/
 │   ├── import_seed_sources.py
 │   ├── plan_crawl.py
 │   ├── fetch_seeds.py
-│   └── discover_links.py
+│   ├── discover_links.py
+│   ├── mark_document_discovery_status.py
+│   └── set_source_patterns.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -252,6 +257,8 @@ LifePilot/
 - HTTP verification and fetching use a transparent LifePilot user-agent and do not impersonate a browser
 - Successful HTTP checks are **not** content authenticity; `robots.txt`, terms, and rate limits still apply
 - Link discovery is bounded: only in-allowlist URLs from stored HTML; PDFs are listed but not fetched yet
+- Fetched HTML that looks like a bot-protection interstitial is not stored as a successful version; sources stay approved
+- Approved allowlists do not widen on seed re-import; use `scripts/set_source_patterns.py --confirm-expand` for intentional expansions
 
 ## Stack (planned)
 

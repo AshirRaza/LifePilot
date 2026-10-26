@@ -5,8 +5,18 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lifepilot.db.models import SOURCE_REVIEW_STATUSES, Source
-from lifepilot.registry.urls import validate_seed_and_patterns
+from lifepilot.db.models import (
+    DOCUMENT_DISCOVERY_STATUSES,
+    SOURCE_REVIEW_STATUSES,
+    Document,
+    Source,
+)
+from lifepilot.registry.urls import (
+    InvalidRegistryUrlError,
+    patterns_expand_scope,
+    validate_allowlist_update,
+    validate_seed_and_patterns,
+)
 
 
 class ReviewError(ValueError):
@@ -55,3 +65,66 @@ def set_source_review_status(
     session.add(source)
     session.flush()
     return source
+
+
+def set_source_allowed_patterns(
+    session: Session,
+    *,
+    source_id: int,
+    patterns: list[str],
+    confirm_scope_expansion: bool = False,
+) -> Source:
+    """Explicitly replace ``allowed_url_patterns`` for one source.
+
+    Seed import never expands reviewed scopes. This is the manual path for
+    intentional widenings (e.g. EU residence section). Requires
+    ``confirm_scope_expansion=True`` when the new patterns enlarge scope.
+    """
+    source = session.get(Source, source_id)
+    if source is None:
+        raise ReviewError("Source not found")
+
+    try:
+        _, validated = validate_allowlist_update(
+            source.seed_url,
+            patterns,
+            require_https=True,
+        )
+    except InvalidRegistryUrlError as exc:
+        raise ReviewError(str(exc)) from exc
+    existing = list(source.allowed_url_patterns or [])
+    if patterns_expand_scope(existing, validated) and not confirm_scope_expansion:
+        raise ReviewError(
+            "new patterns expand crawl scope; pass confirm_scope_expansion=True "
+            "after explicit review"
+        )
+
+    source.allowed_url_patterns = validated
+    session.add(source)
+    session.flush()
+    return source
+
+
+def set_document_discovery_status(
+    session: Session,
+    *,
+    document_id: int,
+    status: str,
+) -> Document:
+    """Explicitly set ``documents.discovery_status`` (not source review_status).
+
+    Use ``rejected`` to exclude a document from discovery/downstream processing
+    when stored HTML is unsuitable, without rejecting the official source.
+    """
+    if status not in DOCUMENT_DISCOVERY_STATUSES:
+        raise ReviewError(
+            f"Invalid discovery_status {status!r}; "
+            f"expected one of {DOCUMENT_DISCOVERY_STATUSES}"
+        )
+    document = session.get(Document, document_id)
+    if document is None:
+        raise ReviewError("Document not found")
+    document.discovery_status = status
+    session.add(document)
+    session.flush()
+    return document

@@ -369,3 +369,64 @@ def validate_seed_and_patterns(
     if not validated:
         raise InvalidRegistryUrlError("At least one allowlist pattern is required")
     return normalized_seed, validated
+
+
+def validate_allowlist_update(
+    seed_url: str,
+    patterns: list[str] | tuple[str, ...],
+    *,
+    require_https: bool = True,
+) -> tuple[str, list[str]]:
+    """Validate an explicit allowlist replacement for an existing source.
+
+    Unlike ``validate_seed_and_patterns``, patterns may be ancestors of the seed
+    path (intentional scope widening). The seed URL must still match at least
+    one pattern. Host, scheme, port, and path-safety rules still apply.
+    """
+    normalized_seed = validate_http_url(
+        seed_url, require_https=require_https, allow_http=not require_https
+    )
+    seed_parts = urlsplit(normalized_seed)
+    seed_host = seed_parts.hostname or ""
+    seed_scheme = seed_parts.scheme
+    seed_port = effective_port(seed_scheme, seed_parts.port)
+
+    validated: list[str] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        parsed = parse_allowed_pattern(pattern)
+        if parsed.scheme != seed_scheme:
+            raise InvalidRegistryUrlError(
+                f"Pattern scheme must match seed scheme ({seed_scheme}): {pattern!r}"
+            )
+        if parsed.host != seed_host:
+            raise InvalidRegistryUrlError(
+                f"Pattern host must match seed host ({seed_host}): {pattern!r}"
+            )
+        if parsed.port != seed_port:
+            raise InvalidRegistryUrlError(
+                f"Pattern port must match seed port ({seed_port}): {pattern!r}"
+            )
+        if require_https and parsed.scheme != "https":
+            raise InvalidRegistryUrlError(
+                f"HTTPS is required for approved seed patterns: {pattern!r}"
+            )
+        if parsed.port not in {_DEFAULT_PORTS.get(parsed.scheme)}:
+            netloc = f"{parsed.host}:{parsed.port}"
+        else:
+            netloc = parsed.host
+        base = urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+        if parsed.path != "/" and base.endswith("/"):
+            base = base.rstrip("/")
+        canonical = f"{base}*" if parsed.recursive else base
+        if canonical not in seen:
+            seen.add(canonical)
+            validated.append(canonical)
+
+    if not validated:
+        raise InvalidRegistryUrlError("At least one allowlist pattern is required")
+    if not url_in_any_allowed_pattern(normalized_seed, validated):
+        raise InvalidRegistryUrlError(
+            f"Seed URL {normalized_seed!r} is outside the proposed allowlist"
+        )
+    return normalized_seed, validated

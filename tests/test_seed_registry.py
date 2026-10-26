@@ -19,7 +19,12 @@ from lifepilot.registry.importer import (
     resolve_patterns_for_import,
     sync_report_review_statuses,
 )
-from lifepilot.registry.review import ReviewError, set_source_review_status
+from lifepilot.registry.review import (
+    ReviewError,
+    set_document_discovery_status,
+    set_source_allowed_patterns,
+    set_source_review_status,
+)
 from lifepilot.registry.seeds import SOURCES
 from lifepilot.registry.urls import (
     InvalidRegistryUrlError,
@@ -27,6 +32,7 @@ from lifepilot.registry.urls import (
     path_prefix_pattern,
     patterns_expand_scope,
     url_matches_allowed_pattern,
+    validate_allowlist_update,
     validate_http_url,
     validate_seed_and_patterns,
 )
@@ -456,3 +462,135 @@ def test_report_totals_reflect_explicit_review_ops(db_session):
     assert report.candidate_count == len(SOURCES) - 1
     gb = next(s for s in report.sources if s.key == "gb_skilled_worker_visa")
     assert gb.review_status == "approved"
+
+
+def test_eu_residence_expanded_scope_matches_children_not_unrelated():
+    # Proposed explicit widenings (slash optional) normalize equivalently.
+    for pattern in (
+        "https://europa.eu/youreurope/citizens/residence/*",
+        "https://europa.eu/youreurope/citizens/residence*",
+    ):
+        assert url_matches_allowed_pattern(
+            "https://europa.eu/youreurope/citizens/residence/index_en.htm",
+            pattern,
+        )
+        assert url_matches_allowed_pattern(
+            "https://europa.eu/youreurope/citizens/residence/"
+            "residence-rights/workers/index_en.htm",
+            pattern,
+        )
+        assert url_matches_allowed_pattern(
+            "https://europa.eu/youreurope/citizens/residence/"
+            "family-residence-rights/index_en.htm",
+            pattern,
+        )
+        assert not url_matches_allowed_pattern(
+            "https://europa.eu/youreurope/citizens/travel/index_en.htm",
+            pattern,
+        )
+        assert not url_matches_allowed_pattern(
+            "https://europa.eu/youreurope/business/index_en.htm",
+            pattern,
+        )
+        assert not url_matches_allowed_pattern(
+            "https://europa.eu/youreurope/citizens/residence-evil/x",
+            pattern,
+        )
+        assert not url_matches_allowed_pattern(
+            "http://europa.eu/youreurope/citizens/residence/index_en.htm",
+            pattern,
+        )
+        assert not url_matches_allowed_pattern(
+            "https://evil.europa.eu/youreurope/citizens/residence/index_en.htm",
+            pattern,
+        )
+
+
+def test_eu_seed_import_validator_rejects_ancestor_widen_without_explicit_api():
+    seed = "https://europa.eu/youreurope/citizens/residence/index_en.htm"
+    with pytest.raises(InvalidRegistryUrlError):
+        validate_seed_and_patterns(
+            seed,
+            ["https://europa.eu/youreurope/citizens/residence*"],
+            require_https=True,
+        )
+    # Explicit allowlist update path allows ancestor widenings that still
+    # contain the seed URL.
+    _, patterns = validate_allowlist_update(
+        seed,
+        ["https://europa.eu/youreurope/citizens/residence/*"],
+        require_https=True,
+    )
+    assert patterns == ["https://europa.eu/youreurope/citizens/residence*"]
+
+
+def test_explicit_pattern_update_requires_confirm_to_expand(db_session):
+    _clear_registry(db_session)
+    import_seed_sources(db_session, verify=False)
+    db_session.flush()
+    source = db_session.scalar(
+        select(Source).where(
+            Source.seed_url_normalized
+            == "https://europa.eu/youreurope/citizens/residence/index_en.htm"
+        )
+    )
+    assert source is not None
+    set_source_review_status(db_session, source_id=source.id, status="approved")
+    db_session.flush()
+    original = list(source.allowed_url_patterns or [])
+
+    with pytest.raises(ReviewError, match="expand"):
+        set_source_allowed_patterns(
+            db_session,
+            source_id=source.id,
+            patterns=["https://europa.eu/youreurope/citizens/residence*"],
+            confirm_scope_expansion=False,
+        )
+    db_session.refresh(source)
+    assert list(source.allowed_url_patterns or []) == original
+
+    updated = set_source_allowed_patterns(
+        db_session,
+        source_id=source.id,
+        patterns=["https://europa.eu/youreurope/citizens/residence/*"],
+        confirm_scope_expansion=True,
+    )
+    db_session.flush()
+    assert list(updated.allowed_url_patterns) == [
+        "https://europa.eu/youreurope/citizens/residence*"
+    ]
+    # Import still cannot silently re-expand / rewrite reviewed scopes.
+    import_seed_sources(db_session, verify=False)
+    db_session.flush()
+    db_session.refresh(source)
+    assert list(source.allowed_url_patterns) == [
+        "https://europa.eu/youreurope/citizens/residence*"
+    ]
+
+
+def test_document_discovery_status_rejected_does_not_reject_source(db_session):
+    _clear_registry(db_session)
+    import_seed_sources(db_session, verify=False)
+    db_session.flush()
+    source = db_session.scalar(select(Source).limit(1))
+    assert source is not None
+    set_source_review_status(db_session, source_id=source.id, status="approved")
+    db_session.flush()
+    doc = Document(
+        authority_id=source.authority_id,
+        primary_source_id=source.id,
+        canonical_url=source.seed_url,
+        url_normalized=source.seed_url_normalized,
+        content_kind="html_page",
+        language="en",
+        discovery_status="seed",
+    )
+    db_session.add(doc)
+    db_session.flush()
+
+    set_document_discovery_status(db_session, document_id=doc.id, status="rejected")
+    db_session.flush()
+    db_session.refresh(doc)
+    db_session.refresh(source)
+    assert doc.discovery_status == "rejected"
+    assert source.review_status == "approved"

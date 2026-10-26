@@ -17,6 +17,11 @@ from urllib.parse import urlsplit
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from lifepilot.crawl.html_quality import (
+    OUTCOME_BLOCKED_BY_BOT_PROTECTION,
+    OUTCOME_INVALID_CONTENT,
+    assess_html_content,
+)
 from lifepilot.crawl.http_fetch import fetch_html_seed
 from lifepilot.crawl.planner import DECISION_PLANNED, evaluate_source
 from lifepilot.crawl.policy import CrawlPolicy, fetcher_policy
@@ -41,6 +46,14 @@ STATUS_FETCHED_NEW_VERSION = "fetched_new_version"
 STATUS_UNCHANGED = "unchanged"
 STATUS_SKIPPED = "skipped"
 STATUS_FAILED = "failed"
+STATUS_BLOCKED_BY_BOT_PROTECTION = OUTCOME_BLOCKED_BY_BOT_PROTECTION
+STATUS_INVALID_CONTENT = OUTCOME_INVALID_CONTENT
+
+_UNSUCCESSFUL_PERSIST = {
+    STATUS_FAILED,
+    STATUS_BLOCKED_BY_BOT_PROTECTION,
+    STATUS_INVALID_CONTENT,
+}
 
 
 @dataclass
@@ -73,7 +86,7 @@ class SeedFetchReport:
 
     @property
     def failed(self) -> int:
-        return sum(1 for r in self.results if r.status == STATUS_FAILED)
+        return sum(1 for r in self.results if r.status in _UNSUCCESSFUL_PERSIST)
 
     @property
     def skipped(self) -> int:
@@ -82,6 +95,15 @@ class SeedFetchReport:
     @property
     def dry_run(self) -> int:
         return sum(1 for r in self.results if r.status == STATUS_DRY_RUN)
+
+    @property
+    def blocked(self) -> int:
+        return sum(
+            1
+            for r in self.results
+            if r.status
+            in {STATUS_BLOCKED_BY_BOT_PROTECTION, STATUS_INVALID_CONTENT}
+        )
 
 
 def _get_source(session: Session, source_id: int) -> Source | None:
@@ -146,6 +168,26 @@ def _persist_html_version(
     final_url: str | None,
     storage_root: Path,
 ) -> SeedFetchResult:
+    quality = assess_html_content(html_body)
+    if not quality.ok:
+        existing = session.scalar(
+            select(Document).where(Document.url_normalized == url_normalized)
+        )
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=requested_url,
+            status=quality.outcome,
+            document_id=existing.id if existing is not None else None,
+            content_sha256=hashlib.sha256(html_body).hexdigest(),
+            http_status=http_status,
+            final_url=final_url,
+            message=(
+                f"{quality.message}; not stored as a document version "
+                "(previous versions left unchanged)"
+            ),
+        )
+
     digest = hashlib.sha256(html_body).hexdigest()
     document = _get_or_create_document(
         session,

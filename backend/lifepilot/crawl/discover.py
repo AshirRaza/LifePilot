@@ -127,6 +127,17 @@ def discover_from_document(
             message=source_error,
         )
 
+    if document.discovery_status == "rejected":
+        return DiscoveryReport(
+            parent_document_id=document_id,
+            source_id=source.id,
+            base_url=document.canonical_url,
+            message=(
+                "document discovery_status=rejected; "
+                "excluded from discovery and downstream content processing"
+            ),
+        )
+
     current = get_current_version(session, document.id)
     if current is None:
         return DiscoveryReport(

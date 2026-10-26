@@ -18,7 +18,10 @@ from lifepilot.crawl.links import discover_links_from_html, resolve_and_classify
 from lifepilot.crawl.policy import fetcher_policy
 from lifepilot.db.models import Authority, Document, DocumentVersion, Jurisdiction, Source
 from lifepilot.registry.importer import import_seed_sources
-from lifepilot.registry.review import set_source_review_status
+from lifepilot.registry.review import (
+    set_document_discovery_status,
+    set_source_review_status,
+)
 from lifepilot.registry.urls import normalize_url, path_prefix_pattern
 
 
@@ -433,3 +436,36 @@ def test_discover_uses_selected_source_allowlist_not_document_owner(
     )
     assert narrow_report.source_id == narrow.id
     assert narrow_report.parent_document_id == hsm_doc.id
+
+
+def test_rejected_document_excluded_from_discovery(db_session, tmp_path: Path):
+    _clear_registry(db_session)
+    source = _approve_one(db_session)
+    seed = fetch_approved_seed(
+        db_session,
+        source.id,
+        persist=True,
+        http_client=_mock_client(
+            html=b"<html><body><a href='/skilled-worker-visa/a'>A</a></body></html>"
+        ),
+        storage_root=tmp_path,
+        policy=fetcher_policy(),
+    )
+    db_session.flush()
+    assert seed.document_id is not None
+    set_document_discovery_status(
+        db_session, document_id=seed.document_id, status="rejected"
+    )
+    db_session.flush()
+
+    report = discover_from_source_seed(
+        db_session,
+        source.id,
+        persist=False,
+        storage_root=tmp_path,
+        policy=fetcher_policy(),
+    )
+    assert report.links == []
+    assert "rejected" in report.message
+    db_session.refresh(source)
+    assert source.review_status == "approved"
