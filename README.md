@@ -14,8 +14,10 @@ Phases completed so far:
 6. **Bounded link discovery** — extract in-allowlist links from stored HTML; fetch HTML only (PDFs listed, not downloaded)
 7. **HTML content-quality checks** — reject recognizable bot-protection / WAF interstitials (e.g. Radware) before storing versions
 8. **PDF/DOCX ingestion** — discover in-allowlist binary links from stored HTML; validate magic/OOXML; versioned raw storage (no text extraction yet)
+9. **Structured HTML extraction** — convert stored HTML versions into ordered JSON blocks (title/headings/paragraphs/lists/tables); raw files unchanged
+10. **Structured PDF/DOCX extraction** — extract searchable text from stored binaries (PDF page provenance; DOCX style hierarchy); no OCR
 
-No open crawl, text extraction/OCR, embeddings/RAG, API, or frontend yet.
+No open crawl, OCR, embeddings/RAG, API, or frontend yet.
 
 ## Prerequisites
 
@@ -169,7 +171,27 @@ python scripts/discover_links.py --source-id 86 --persist
 
 Discovery stays inside each source’s allowlist. It does not spider the open web.
 
-### 11. Run tests
+### 11. Structured extraction (from stored versions)
+
+Reads existing raw files only — no crawl or download. Dry-run (default):
+
+```powershell
+python scripts/extract_html.py
+python scripts/extract_html.py --document-id 99
+python scripts/extract_documents.py --pdf --document-id 333
+python scripts/extract_documents.py --kinds html,pdf,docx --max-documents 5
+```
+
+Persist derived JSON + `document_extractions` (explicit opt-in; bounded):
+
+```powershell
+python scripts/extract_html.py --persist --document-id 99
+python scripts/extract_documents.py --persist --pdf --max-documents 3
+```
+
+Output lives under `data/extracted/documents/{document_id}/v{n}.{extractor}.json` (gitignored). Documents with `discovery_status=rejected` are skipped. Raw `data/raw/` files are never rewritten. Re-running the same extractor version with the same content hash is a no-op (`unchanged`); bumping an extractor version updates the current extraction row for that `(document_version_id, extractor_name)`.
+
+### 12. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -197,7 +219,11 @@ pytest -v
 | `python scripts/set_source_patterns.py` | Explicit allowlist change (requires `--confirm-expand` to widen) |
 | `python scripts/discover_documents.py --source-id N` | Dry-run PDF/DOCX discovery from stored HTML |
 | `python scripts/discover_documents.py --source-id N --persist` | Download/store in-scope PDF/DOCX (default max 3) |
-| `pytest -v` | Run schema + registry + crawl tests |
+| `python scripts/extract_html.py` | Dry-run structured HTML extraction |
+| `python scripts/extract_html.py --persist --document-id N` | Persist HTML extraction JSON + DB row |
+| `python scripts/extract_documents.py --pdf` | Dry-run PDF extraction (add `--docx` / `--html`) |
+| `python scripts/extract_documents.py --persist --pdf --document-id N` | Persist PDF extraction |
+| `pytest -v` | Run schema + registry + crawl + extract tests |
 
 ### Inspect tables in Postgres
 
@@ -226,9 +252,10 @@ LifePilot/
 ├── backend/lifepilot/
 │   ├── db/                      # SQLAlchemy models + session
 │   ├── registry/                # Seed registry (import, verify, review, URL scope)
-│   └── crawl/                   # Planner, seed fetch, bounded link discovery
-├── data/                        # Fetched HTML (gitignored; created on persist)
-├── tests/                       # Schema + registry + crawl tests
+│   ├── crawl/                   # Planner, seed fetch, bounded link/binary discovery
+│   └── extract/                 # Structured HTML/PDF/DOCX extraction
+├── data/                        # Raw + extracted files (gitignored)
+├── tests/                       # Schema + registry + crawl + extract tests
 ├── scripts/
 │   ├── run_migrate.py
 │   ├── import_seed_sources.py
@@ -237,7 +264,9 @@ LifePilot/
 │   ├── discover_links.py
 │   ├── mark_document_discovery_status.py
 │   ├── set_source_patterns.py
-│   └── discover_documents.py
+│   ├── discover_documents.py
+│   ├── extract_html.py
+│   └── extract_documents.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -252,6 +281,7 @@ LifePilot/
 | `sources` | Curated seed URLs + explicit `review_status` |
 | `documents` | One row per normalized URL / language variant |
 | `document_versions` | Historical raw snapshots; at most one `is_current` per document |
+| `document_extractions` | Derived structured content per version + extractor (raw files immutable) |
 | `document_jurisdictions` | Explicit applicability (never inferred from hierarchy alone) |
 
 ## Source registry notes
@@ -276,4 +306,4 @@ LifePilot/
 
 ## Next steps
 
-Text extraction from stored HTML/PDF/DOCX (no OCR first), then chunking/embeddings/RAG—built incrementally.
+Live PDF/DOCX extraction on stored IND binaries (after review), then chunking/embeddings/RAG—built incrementally.

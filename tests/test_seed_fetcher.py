@@ -18,12 +18,20 @@ from lifepilot.crawl.fetcher import (
 )
 from lifepilot.crawl.http_fetch import fetch_html_seed
 from lifepilot.crawl.policy import FETCHER_USER_AGENT, fetcher_policy
-from lifepilot.db.models import Authority, Document, DocumentVersion, Jurisdiction, Source
+from lifepilot.db.models import (
+    Authority,
+    Document,
+    DocumentExtraction,
+    DocumentVersion,
+    Jurisdiction,
+    Source,
+)
 from lifepilot.registry.importer import import_seed_sources
 from lifepilot.registry.review import set_source_review_status
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))
     session.execute(delete(Source))

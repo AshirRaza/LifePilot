@@ -41,6 +41,26 @@ def version_file_path(
     )
 
 
+def extraction_file_path(
+    root: Path,
+    document_id: int,
+    version_number: int,
+    *,
+    extractor_name: str = "html_structured",
+) -> Path:
+    """Absolute path for a derived structured extraction JSON file."""
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in extractor_name
+    )
+    return (
+        root
+        / "extracted"
+        / "documents"
+        / str(document_id)
+        / f"v{version_number}.{safe_name}.json"
+    )
+
+
 def relative_storage_path(root: Path, absolute: Path) -> str:
     """Store paths relative to data root when possible."""
     try:

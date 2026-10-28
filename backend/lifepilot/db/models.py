@@ -50,6 +50,7 @@ SOURCE_REVIEW_STATUSES = ("approved", "candidate", "rejected")
 DOCUMENT_CONTENT_KINDS = ("html_page", "pdf", "docx", "other")
 DOCUMENT_DISCOVERY_STATUSES = ("seed", "discovered", "approved", "rejected")
 DOCUMENT_JURISDICTION_RELEVANCE = ("applicable", "related")
+DOCUMENT_EXTRACTION_STATUSES = ("success", "empty", "failed", "skipped")
 
 
 class Jurisdiction(Base):
@@ -274,6 +275,63 @@ class DocumentVersion(Base):
     document: Mapped[Document] = relationship(back_populates="versions")
     fetched_via_source: Mapped[Optional[Source]] = relationship(
         back_populates="fetched_versions"
+    )
+    extractions: Mapped[list["DocumentExtraction"]] = relationship(
+        back_populates="document_version"
+    )
+
+
+class DocumentExtraction(Base):
+    """Structured extraction derived from an immutable document version.
+
+    Raw ``document_versions`` rows and files are never overwritten. Re-running
+    the same extractor updates this row and the derived JSON only.
+    """
+
+    __tablename__ = "document_extractions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ("
+            + ", ".join(f"'{s}'" for s in DOCUMENT_EXTRACTION_STATUSES)
+            + ")",
+            name="ck_document_extractions_status",
+        ),
+        UniqueConstraint(
+            "document_version_id",
+            "extractor_name",
+            name="uq_document_extractions_version_extractor",
+        ),
+        Index("ix_document_extractions_document_version_id", "document_version_id"),
+        Index("ix_document_extractions_status", "status"),
+        Index("ix_document_extractions_content_sha256", "content_sha256"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    document_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=False
+    )
+    extractor_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extractor_version: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[Optional[str]] = mapped_column(CHAR(64), nullable=True)
+    storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extracted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    document_version: Mapped[DocumentVersion] = relationship(
+        back_populates="extractions"
     )
 
 

@@ -20,7 +20,14 @@ from lifepilot.crawl.html_quality import (
     assess_html_content,
 )
 from lifepilot.crawl.policy import fetcher_policy
-from lifepilot.db.models import Authority, Document, DocumentVersion, Jurisdiction, Source
+from lifepilot.db.models import (
+    Authority,
+    Document,
+    DocumentExtraction,
+    DocumentVersion,
+    Jurisdiction,
+    Source,
+)
 from lifepilot.registry.importer import import_seed_sources
 from lifepilot.registry.review import set_source_review_status
 
@@ -63,6 +70,7 @@ AMBIGUOUS_HTML = b"""<!DOCTYPE html>
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))
     session.execute(delete(Source))

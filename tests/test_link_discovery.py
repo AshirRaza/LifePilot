@@ -16,7 +16,14 @@ from lifepilot.crawl.fetcher import (
 )
 from lifepilot.crawl.links import discover_links_from_html, resolve_and_classify_link
 from lifepilot.crawl.policy import fetcher_policy
-from lifepilot.db.models import Authority, Document, DocumentVersion, Jurisdiction, Source
+from lifepilot.db.models import (
+    Authority,
+    Document,
+    DocumentExtraction,
+    DocumentVersion,
+    Jurisdiction,
+    Source,
+)
 from lifepilot.registry.importer import import_seed_sources
 from lifepilot.registry.review import (
     set_document_discovery_status,
@@ -26,6 +33,7 @@ from lifepilot.registry.urls import normalize_url, path_prefix_pattern
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))
     session.execute(delete(Source))
