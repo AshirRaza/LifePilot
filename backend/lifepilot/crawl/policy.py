@@ -15,7 +15,7 @@ CRAWL_PLANNER_USER_AGENT = (
 FETCHER_USER_AGENT = (
     "LifePilotFetcher/0.1 "
     "(+https://github.com/AshirRaza/LifePilot; "
-    "approved-seed and bounded in-scope HTML fetch only)"
+    "approved-seed and bounded in-scope HTML/PDF/DOCX fetch only)"
 )
 
 
@@ -29,7 +29,8 @@ class CrawlPolicy:
     default_crawl_delay_seconds: float = 2.0
     # Hard ceiling even if robots.txt requests a smaller delay.
     min_crawl_delay_seconds: float = 1.0
-    # Soft cap for planning/reporting; fetcher also paces by crawl delay.
+    # Advisory planning/reporting hint only — not enforced by the fetcher.
+    # Host pacing uses robots Crawl-delay (or default_crawl_delay_seconds).
     max_requests_per_host_per_minute: int = 20
     # If robots.txt cannot be retrieved, do not treat the URL as fetchable.
     require_robots_ok: bool = True

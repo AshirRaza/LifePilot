@@ -1,4 +1,4 @@
-"""Local filesystem storage for fetched HTML seed pages."""
+"""Local filesystem storage for fetched and extracted document artifacts."""
 
 from __future__ import annotations
 
@@ -19,6 +19,32 @@ def data_root(explicit: Path | str | None = None) -> Path:
     # backend/lifepilot/crawl/storage.py -> repo root is parents[3]
     repo_root = Path(__file__).resolve().parents[3]
     return (repo_root / DEFAULT_DATA_DIRNAME).resolve()
+
+
+def resolve_under_data_root(root: Path, storage_path: str) -> Path:
+    """Resolve ``storage_path`` and require it to stay under ``root``.
+
+    Uses ``Path.is_relative_to`` so prefix collisions (e.g. ``.../data`` vs
+    ``.../database``) cannot bypass the boundary.
+    """
+    root_resolved = root.resolve()
+    candidate = Path(storage_path)
+    path = (
+        candidate.resolve()
+        if candidate.is_absolute()
+        else (root_resolved / candidate).resolve()
+    )
+    if not path.is_relative_to(root_resolved):
+        raise ValueError(f"storage_path escapes data root: {storage_path}")
+    return path
+
+
+def safe_read_bytes(root: Path, storage_path: str) -> bytes:
+    """Read a stored file after verifying it resolves under ``root``."""
+    path = resolve_under_data_root(root, storage_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"stored file not found: {path}")
+    return path.read_bytes()
 
 
 def version_file_path(

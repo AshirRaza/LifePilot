@@ -11,13 +11,13 @@ Phases completed so far:
 3. **Source registry** — curated official seed URLs (GB, DE, NL, CA, EU), idempotent importer, HTTP reachability checks, explicit approval workflow
 4. **Dry-run crawl planner** — allowlist + robots.txt + rate-policy plan for approved seeds
 5. **Seed HTML fetcher** — fetch approved seed URLs only; dry-run by default
-6. **Bounded link discovery** — extract in-allowlist links from stored HTML; fetch HTML only (PDFs listed, not downloaded)
+6. **Bounded link discovery** — extract in-allowlist links from stored HTML; fetch in-scope HTML (PDFs listed here; binary download is a separate command)
 7. **HTML content-quality checks** — reject recognizable bot-protection / WAF interstitials (e.g. Radware) before storing versions
-8. **PDF/DOCX ingestion** — discover in-allowlist binary links from stored HTML; validate magic/OOXML; versioned raw storage (no text extraction yet)
+8. **PDF/DOCX download** — discover in-allowlist binary links from stored HTML; validate magic/OOXML; versioned raw storage under `data/raw/`
 9. **Structured HTML extraction** — convert stored HTML versions into ordered JSON blocks (title/headings/paragraphs/lists/tables); raw files unchanged
 10. **Structured PDF/DOCX extraction** — extract searchable text from stored binaries (PDF page provenance; DOCX style hierarchy); no OCR
 
-No open crawl, OCR, embeddings/RAG, API, or frontend yet.
+Not yet implemented: open crawl, OCR, chunking/embeddings/RAG, API, or frontend.
 
 ## Prerequisites
 
@@ -145,16 +145,16 @@ python scripts/fetch_seeds.py
 python scripts/fetch_seeds.py --source-id 86
 ```
 
-Persist HTML + `documents` / `document_versions` (explicit opt-in):
+Persist HTML + `documents` / `document_versions` (explicit opt-in; commits per seed):
 
 ```powershell
 python scripts/fetch_seeds.py --persist --source-id 86
 python scripts/fetch_seeds.py --persist
 ```
 
-Files are stored under `data/raw/documents/{document_id}/v{n}.html` (gitignored). Only HTML is accepted.
+Files are stored under `data/raw/documents/{document_id}/v{n}.html` (gitignored). Seed fetch accepts HTML only (bot-protection pages are not stored).
 
-### 10. Bounded link discovery (from stored HTML)
+### 10. Bounded HTML link discovery (from stored HTML)
 
 Requires a previously persisted seed document. Dry-run (default — list only):
 
@@ -163,35 +163,47 @@ python scripts/discover_links.py --source-id 86
 python scripts/discover_links.py --document-id 99
 ```
 
-Persist in-scope HTML links (capped per run; PDFs are reported but not downloaded):
+Persist in-scope HTML links (capped per run; PDFs/DOCX are listed but not downloaded here):
 
 ```powershell
 python scripts/discover_links.py --source-id 86 --persist
 ```
 
-Discovery stays inside each source’s allowlist. It does not spider the open web.
+Discovery stays inside each source’s allowlist. It does not spider the open web. Host pacing honors robots.txt `Crawl-delay` (or the policy default).
 
-### 11. Structured extraction (from stored versions)
+### 11. PDF/DOCX download (from stored HTML)
+
+```powershell
+python scripts/discover_documents.py --source-id N
+python scripts/discover_documents.py --source-id N --persist
+python scripts/discover_documents.py --source-id N --persist --max-documents 3
+```
+
+Downloads in-allowlist PDF/DOCX only (magic/OOXML validated). Default cap is 3 binaries per run. Stored as `data/raw/documents/{document_id}/v{n}.pdf` or `.docx`.
+
+### 12. Structured extraction (from stored versions)
+
+Primary CLI: `scripts/extract_documents.py` (HTML/PDF/DOCX). `scripts/extract_html.py` remains a thin HTML-only compatibility wrapper.
 
 Reads existing raw files only — no crawl or download. Dry-run (default):
 
 ```powershell
-python scripts/extract_html.py
-python scripts/extract_html.py --document-id 99
+python scripts/extract_documents.py --document-id 99
 python scripts/extract_documents.py --pdf --document-id 333
 python scripts/extract_documents.py --kinds html,pdf,docx --max-documents 5
+python scripts/extract_html.py --document-id 99
 ```
 
-Persist derived JSON + `document_extractions` (explicit opt-in; bounded):
+Persist derived JSON + `document_extractions` (explicit opt-in; commits per document version):
 
 ```powershell
-python scripts/extract_html.py --persist --document-id 99
 python scripts/extract_documents.py --persist --pdf --max-documents 3
+python scripts/extract_html.py --persist --document-id 99
 ```
 
 Output lives under `data/extracted/documents/{document_id}/v{n}.{extractor}.json` (gitignored). Documents with `discovery_status=rejected` are skipped. Raw `data/raw/` files are never rewritten. Re-running the same extractor version with the same content hash is a no-op (`unchanged`); bumping an extractor version updates the current extraction row for that `(document_version_id, extractor_name)`.
 
-### 12. Run tests
+### 13. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -213,16 +225,15 @@ pytest -v
 | `python scripts/plan_crawl.py` | Dry-run crawl plan for approved sources |
 | `python scripts/fetch_seeds.py` | Dry-run seed fetch preflight |
 | `python scripts/fetch_seeds.py --persist` | Download/store approved seed HTML |
-| `python scripts/discover_links.py --source-id N` | Dry-run link discovery from stored HTML |
+| `python scripts/discover_links.py --source-id N` | Dry-run HTML link discovery from stored HTML |
 | `python scripts/discover_links.py --source-id N --persist` | Fetch in-scope discovered HTML |
 | `python scripts/mark_document_discovery_status.py` | Explicitly exclude/include a document for discovery |
 | `python scripts/set_source_patterns.py` | Explicit allowlist change (requires `--confirm-expand` to widen) |
 | `python scripts/discover_documents.py --source-id N` | Dry-run PDF/DOCX discovery from stored HTML |
 | `python scripts/discover_documents.py --source-id N --persist` | Download/store in-scope PDF/DOCX (default max 3) |
-| `python scripts/extract_html.py` | Dry-run structured HTML extraction |
-| `python scripts/extract_html.py --persist --document-id N` | Persist HTML extraction JSON + DB row |
-| `python scripts/extract_documents.py --pdf` | Dry-run PDF extraction (add `--docx` / `--html`) |
-| `python scripts/extract_documents.py --persist --pdf --document-id N` | Persist PDF extraction |
+| `python scripts/extract_documents.py` | Dry-run structured extraction (HTML/PDF/DOCX) |
+| `python scripts/extract_documents.py --persist --pdf --document-id N` | Persist extraction JSON + DB row |
+| `python scripts/extract_html.py` | Thin HTML-only wrapper around extract_documents |
 | `pytest -v` | Run schema + registry + crawl + extract tests |
 
 ### Inspect tables in Postgres
@@ -284,14 +295,17 @@ LifePilot/
 | `document_extractions` | Derived structured content per version + extractor (raw files immutable) |
 | `document_jurisdictions` | Explicit applicability (never inferred from hierarchy alone) |
 
-## Source registry notes
+## Source registry / crawl safety notes
 
 - Seed metadata is separate from downloaded documents
 - Allowlist patterns use a narrow path scope (`https://host/path*`); matching requires exact scheme/host and genuine path descendants — not naive string prefixes
-- HTTP verification and fetching use a transparent LifePilot user-agent and do not impersonate a browser
-- Successful HTTP checks are **not** content authenticity; `robots.txt`, terms, and rate limits still apply
-- Link discovery is bounded: only in-allowlist URLs from stored HTML; PDFs are listed but not fetched yet
+- HTTP verification and fetching use a transparent LifePilot user-agent (`LifePilotFetcher` for HTML/PDF/DOCX) and do not impersonate a browser
+- Successful HTTP checks are **not** content authenticity; `robots.txt`, terms, and site policies still apply
+- Host pacing uses robots.txt `Crawl-delay` when present (otherwise `default_crawl_delay_seconds`, floored by `min_crawl_delay_seconds`). `max_requests_per_host_per_minute` is advisory for planning/reporting only — not enforced as a hard fetcher limit
+- Per-run caps: discovered HTML fetches, discovered binary fetches, max response bytes, max redirects, blocked private/loopback hosts
+- Link discovery is bounded: only in-allowlist URLs from stored HTML; HTML fetch via `discover_links.py`, PDF/DOCX via `discover_documents.py`
 - Fetched HTML that looks like a bot-protection interstitial is not stored as a successful version; sources stay approved
+- Storage path reads use resolved-path containment (`Path.is_relative_to`); batch persist commits per document/version
 - Approved allowlists do not widen on seed re-import; use `scripts/set_source_patterns.py --confirm-expand` for intentional expansions
 
 ## Stack (planned)
@@ -306,4 +320,4 @@ LifePilot/
 
 ## Next steps
 
-Live PDF/DOCX extraction on stored IND binaries (after review), then chunking/embeddings/RAG—built incrementally.
+Phase 5C+ (not started here): chunking, embeddings/RAG over curated extractions, then API/frontend—built incrementally. Do not re-crawl or wipe historical raw/extraction versions unless explicitly intended.

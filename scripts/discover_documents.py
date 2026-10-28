@@ -72,10 +72,9 @@ def main() -> int:
             policy=policy,
             storage_root=args.data_dir,
             include_discovered_html=not args.seed_html_only,
+            commit_each=args.persist,
         )
-        if args.persist:
-            session.commit()
-        else:
+        if not args.persist:
             session.rollback()
 
     mode = "persist" if args.persist else "dry-run"

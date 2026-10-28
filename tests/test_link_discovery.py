@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy import delete, func, select
 
 from lifepilot.crawl.discover import discover_from_document, discover_from_source_seed
@@ -220,6 +221,52 @@ def test_discover_persist_fetches_in_scope_html_only(db_session, tmp_path: Path)
     )
     assert version is not None
     assert (tmp_path / version.storage_path).read_bytes() == child_html
+
+
+def test_discovered_html_honors_robots_crawl_delay(db_session, tmp_path: Path):
+    """Discovery HTML fetches must pace with effective robots Crawl-delay."""
+    _clear_registry(db_session)
+    source = _approve_one(db_session)
+    seed_html = b"""
+    <html><body>
+      <a href="/skilled-worker-visa/a">A</a>
+      <a href="/skilled-worker-visa/b">B</a>
+    </body></html>
+    """
+    seed = fetch_approved_seed(
+        db_session,
+        source.id,
+        persist=True,
+        http_client=_mock_client(html=seed_html),
+        storage_root=tmp_path,
+        policy=fetcher_policy(),
+    )
+    db_session.flush()
+    assert seed.status == STATUS_FETCHED_NEW_VERSION
+
+    robots = "User-agent: *\nAllow: /\nCrawl-delay: 7\n"
+    discover_client = _mock_client(
+        html=b"<html><body>child</body></html>",
+        robots_text=robots,
+    )
+    with patch("lifepilot.crawl.fetcher.time.sleep") as sleep_mock:
+        with patch("lifepilot.crawl.fetcher.time.monotonic", return_value=100.0):
+            report = discover_from_source_seed(
+                db_session,
+                source.id,
+                persist=True,
+                policy=fetcher_policy(max_discovered_html_fetches_per_run=2),
+                http_client=discover_client,
+                storage_root=tmp_path,
+            )
+    db_session.flush()
+
+    assert len(report.fetch_results) == 2
+    assert any(r.status == STATUS_FETCHED_NEW_VERSION for r in report.fetch_results)
+    # Second same-host fetch sees zero elapsed time → full Crawl-delay wait.
+    assert sleep_mock.called
+    waited = max(call.args[0] for call in sleep_mock.call_args_list)
+    assert waited == pytest.approx(7.0)
 
 
 def test_discover_respects_html_fetch_cap(db_session, tmp_path: Path):

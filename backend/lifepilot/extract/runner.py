@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 
 from lifepilot.crawl.storage import (
     data_root,
+    delete_quiet,
     extraction_file_path,
     relative_storage_path,
+    safe_read_bytes,
     write_bytes_atomic,
 )
 from lifepilot.db.models import Document, DocumentExtraction, DocumentVersion
@@ -114,16 +116,6 @@ class ExtractionBatchReport:
     @property
     def dry_run_count(self) -> int:
         return sum(1 for r in self.results if r.status == STATUS_DRY_RUN)
-
-
-def _safe_read_bytes(root: Path, storage_path: str) -> bytes:
-    path = (root / storage_path).resolve()
-    root_resolved = root.resolve()
-    if not str(path).startswith(str(root_resolved)):
-        raise ValueError(f"storage_path escapes data root: {storage_path}")
-    if not path.is_file():
-        raise FileNotFoundError(f"stored file not found: {path}")
-    return path.read_bytes()
 
 
 def _existing_extraction(
@@ -310,7 +302,7 @@ def extract_document_version(
 
     root = data_root(storage_root)
     try:
-        raw = _safe_read_bytes(root, version.storage_path)
+        raw = safe_read_bytes(root, version.storage_path)
         structured = spec.extract(raw)
         digest = normalized_content_sha256(structured)
     except Exception as exc:  # noqa: BLE001 — persist failure status
@@ -363,7 +355,7 @@ def extract_document_version(
         and existing.storage_path
     ):
         try:
-            _safe_read_bytes(root, existing.storage_path)
+            safe_read_bytes(root, existing.storage_path)
             base.status = STATUS_UNCHANGED
             base.extraction_id = existing.id
             base.storage_path = existing.storage_path
@@ -372,6 +364,7 @@ def extract_document_version(
         except FileNotFoundError:
             pass
 
+    previous_path = existing.storage_path if existing is not None else None
     rel_path = _write_extraction_json(
         root,
         document_id=document.id,
@@ -387,18 +380,25 @@ def extract_document_version(
         message = "no content blocks extracted"
     elif structured.empty_pages:
         message = f"empty_pages={list(structured.empty_pages)}"
-    row = _upsert_extraction(
-        session,
-        existing=existing,
-        document_version_id=version.id,
-        extractor_name=spec.name,
-        extractor_version=spec.version,
-        status=status,
-        title=structured.title or None,
-        content_sha256=digest,
-        storage_path=rel_path,
-        message=message,
-    )
+    try:
+        row = _upsert_extraction(
+            session,
+            existing=existing,
+            document_version_id=version.id,
+            extractor_name=spec.name,
+            extractor_version=spec.version,
+            status=status,
+            title=structured.title or None,
+            content_sha256=digest,
+            storage_path=rel_path,
+            message=message,
+        )
+    except Exception:
+        # Avoid orphan JSON when the DB write fails. Same-path overwrite
+        # cannot restore prior bytes; leave the new file for retry.
+        if previous_path != rel_path:
+            delete_quiet(root / rel_path)
+        raise
     base.status = status
     base.storage_path = rel_path
     base.extraction_id = row.id
@@ -509,6 +509,35 @@ def _select_versions(
     return list(session.execute(stmt).all())
 
 
+def _commit_extraction_result(
+    session: Session,
+    result: ExtractionResult,
+    *,
+    storage_root: Path | str | None = None,
+) -> ExtractionResult:
+    root = data_root(storage_root)
+    try:
+        session.commit()
+    except Exception as exc:  # noqa: BLE001 — surface as failed extraction
+        session.rollback()
+        if result.storage_path:
+            delete_quiet(root / result.storage_path)
+        return ExtractionResult(
+            document_id=result.document_id,
+            document_version_id=result.document_version_id,
+            version_number=result.version_number,
+            status=STATUS_FAILED,
+            content_kind=result.content_kind,
+            extractor_name=result.extractor_name,
+            extractor_version=result.extractor_version,
+            title=result.title,
+            content_sha256=result.content_sha256,
+            block_count=result.block_count,
+            message=f"commit failed after persist: {exc}",
+        )
+    return result
+
+
 def extract_batch(
     session: Session,
     *,
@@ -519,8 +548,13 @@ def extract_batch(
     include_non_current: bool = False,
     storage_root: Path | str | None = None,
     kinds: list[str] | tuple[str, ...] | None = None,
+    commit_each: bool = False,
 ) -> ExtractionBatchReport:
-    """Extract structured content for a bounded set of stored versions."""
+    """Extract structured content for a bounded set of stored versions.
+
+    When ``persist`` and ``commit_each`` are both True, each version is
+    committed before the next so a later failure cannot undo earlier writes.
+    """
     if max_documents < 1:
         raise ValueError("max_documents must be >= 1")
     content_kinds = _normalize_kinds(kinds)
@@ -540,17 +574,23 @@ def extract_batch(
         )
         return report
 
+    def _run(document: Document, version: DocumentVersion) -> ExtractionResult:
+        result = extract_document_version(
+            session,
+            version,
+            document,
+            persist=persist,
+            storage_root=storage_root,
+        )
+        if persist and commit_each:
+            return _commit_extraction_result(
+                session, result, storage_root=storage_root
+            )
+        return result
+
     if version_id is not None:
         document, version = pairs[0]
-        report.results.append(
-            extract_document_version(
-                session,
-                version,
-                document,
-                persist=persist,
-                storage_root=storage_root,
-            )
-        )
+        report.results.append(_run(document, version))
         return report
 
     allowed_docs: set[int] = set()
@@ -564,15 +604,7 @@ def extract_batch(
     for document, version in pairs:
         if document.id not in allowed_docs:
             continue
-        report.results.append(
-            extract_document_version(
-                session,
-                version,
-                document,
-                persist=persist,
-                storage_root=storage_root,
-            )
-        )
+        report.results.append(_run(document, version))
     return report
 
 
@@ -585,6 +617,7 @@ def extract_html_batch(
     max_documents: int = 10,
     include_non_current: bool = False,
     storage_root: Path | str | None = None,
+    commit_each: bool = False,
 ) -> ExtractionBatchReport:
     """Back-compat HTML-only batch extraction."""
     return extract_batch(
@@ -595,5 +628,6 @@ def extract_html_batch(
         max_documents=max_documents,
         include_non_current=include_non_current,
         storage_root=storage_root,
+        commit_each=commit_each,
         kinds=[KIND_HTML],
     )

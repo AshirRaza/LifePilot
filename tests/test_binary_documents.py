@@ -5,8 +5,9 @@ from __future__ import annotations
 import io
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy import delete, func, select
 
 from lifepilot.crawl.binary_fetch import fetch_binary_url
@@ -204,6 +205,36 @@ def test_binary_fetch_robots_disallow():
     )
     assert result.ok is False
     assert "robots" in (result.error or "")
+
+
+def test_binary_fetch_honors_robots_crawl_delay(db_session, tmp_path: Path):
+    _clear_registry(db_session)
+    source = _approve_gov_uk(db_session)
+    robots = "User-agent: *\nAllow: /\nCrawl-delay: 4\n"
+    client = _mock_client(
+        body=b"%PDF-1.4 delay-test",
+        content_type="application/pdf",
+        robots_text=robots,
+    )
+    host_times: dict[str, float] = {"www.gov.uk": 50.0}
+    with patch("lifepilot.crawl.fetcher.time.sleep") as sleep_mock:
+        with patch("lifepilot.crawl.fetcher.time.monotonic", return_value=50.5):
+            result = fetch_binary_document_url(
+                db_session,
+                source,
+                url="https://www.gov.uk/skilled-worker-visa/delay.pdf",
+                expected_kind="pdf",
+                persist=True,
+                http_client=client,
+                storage_root=tmp_path,
+                policy=fetcher_policy(),
+                apply_rate_limit=True,
+                last_host_fetch_at=host_times,
+            )
+    db_session.flush()
+    assert result.status == STATUS_FETCHED_NEW_VERSION
+    assert sleep_mock.called
+    assert sleep_mock.call_args.args[0] == pytest.approx(3.5)
 
 
 def test_persist_pdf_creates_version(db_session, tmp_path: Path):

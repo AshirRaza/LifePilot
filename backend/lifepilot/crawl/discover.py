@@ -5,18 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lifepilot.crawl.fetcher import (
     STATUS_DRY_RUN,
     STATUS_SKIPPED,
     SeedFetchResult,
+    commit_fetch_result,
     fetch_html_document_url,
 )
 from lifepilot.crawl.links import ExtractedLink, discover_links_from_html
 from lifepilot.crawl.policy import CrawlPolicy, fetcher_policy
-from lifepilot.crawl.storage import data_root
+from lifepilot.crawl.source_docs import document_for_source_seed
+from lifepilot.crawl.storage import data_root, safe_read_bytes
 from lifepilot.db.current_version import get_current_version
 from lifepilot.db.models import Document, Source
 
@@ -47,23 +48,7 @@ class DiscoveryReport:
         return [link for link in self.links if link.kind == "out_of_scope"]
 
 
-def _safe_read_stored_html(root: Path, storage_path: str) -> bytes:
-    path = (root / storage_path).resolve()
-    root_resolved = root.resolve()
-    if not str(path).startswith(str(root_resolved)):
-        raise ValueError(f"storage_path escapes data root: {storage_path}")
-    if not path.is_file():
-        raise FileNotFoundError(f"stored HTML not found: {path}")
-    return path.read_bytes()
-
-
-def _document_for_source_seed(session: Session, source: Source) -> Document | None:
-    return session.scalar(
-        select(Document).where(Document.url_normalized == source.seed_url_normalized)
-    )
-
-
-def _resolve_crawl_source(
+def resolve_crawl_source(
     session: Session,
     document: Document,
     crawl_source_id: int | None,
@@ -99,6 +84,7 @@ def discover_from_document(
     policy: CrawlPolicy | None = None,
     http_client=None,
     storage_root: Path | str | None = None,
+    commit_each: bool = False,
 ) -> DiscoveryReport:
     """Discover in-scope links from a stored document's current HTML version.
 
@@ -120,7 +106,7 @@ def discover_from_document(
             message="document not found",
         )
 
-    source, source_error = _resolve_crawl_source(
+    source, source_error = resolve_crawl_source(
         session, document, crawl_source_id
     )
     if source is None:
@@ -152,7 +138,7 @@ def discover_from_document(
         )
 
     try:
-        raw = _safe_read_stored_html(root, current.storage_path)
+        raw = safe_read_bytes(root, current.storage_path)
     except (OSError, ValueError) as exc:
         return DiscoveryReport(
             parent_document_id=document_id,
@@ -233,6 +219,10 @@ def discover_from_document(
             apply_rate_limit=True,
             last_host_fetch_at=host_times,
         )
+        if commit_each:
+            result = commit_fetch_result(
+                session, result, storage_root=root
+            )
         report.fetch_results.append(result)
 
     return report
@@ -246,6 +236,7 @@ def discover_from_source_seed(
     policy: CrawlPolicy | None = None,
     http_client=None,
     storage_root: Path | str | None = None,
+    commit_each: bool = False,
 ) -> DiscoveryReport:
     """Discover links from the stored seed document of an approved source.
 
@@ -269,7 +260,7 @@ def discover_from_source_seed(
                 f"source review_status={source.review_status!r}; not approved"
             ),
         )
-    document = _document_for_source_seed(session, source)
+    document = document_for_source_seed(session, source)
     if document is None:
         return DiscoveryReport(
             parent_document_id=0,
@@ -288,4 +279,5 @@ def discover_from_source_seed(
         policy=policy,
         http_client=http_client,
         storage_root=storage_root,
+        commit_each=commit_each,
     )

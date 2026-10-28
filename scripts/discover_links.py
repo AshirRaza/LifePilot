@@ -68,6 +68,7 @@ def main() -> int:
                 persist=args.persist,
                 policy=policy,
                 storage_root=args.data_dir,
+                commit_each=args.persist,
             )
         else:
             report = discover_from_source_seed(
@@ -76,10 +77,9 @@ def main() -> int:
                 persist=args.persist,
                 policy=policy,
                 storage_root=args.data_dir,
+                commit_each=args.persist,
             )
-        if args.persist:
-            session.commit()
-        else:
+        if not args.persist:
             session.rollback()
 
     mode = "persist" if args.persist else "dry-run"

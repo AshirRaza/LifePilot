@@ -1,8 +1,10 @@
-"""Approved-seed and bounded in-scope HTML fetcher.
+"""Approved-seed and bounded in-scope HTML/PDF/DOCX fetcher.
 
 Rechecks approval, allowlist, robots, and policy before each fetch.
-Persists HTML under ``data/raw/documents/...`` and records document versions.
-Link discovery is capped separately; this module fetches one URL at a time.
+Persists raw bytes under ``data/raw/documents/...`` and records document versions.
+Host pacing uses robots.txt Crawl-delay (or the policy default). Discovery
+caps and network protections apply; ``max_requests_per_host_per_minute`` is
+advisory only.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from lifepilot.crawl.html_quality import (
 from lifepilot.crawl.http_fetch import fetch_html_seed
 from lifepilot.crawl.planner import DECISION_PLANNED, evaluate_source
 from lifepilot.crawl.policy import CrawlPolicy, fetcher_policy
+from lifepilot.crawl.robots import check_robots, effective_crawl_delay
 from lifepilot.crawl.storage import (
     data_root,
     delete_quiet,
@@ -40,6 +43,10 @@ from lifepilot.registry.urls import (
     normalize_url,
     url_in_any_allowed_pattern,
 )
+
+
+class ContentKindConflictError(ValueError):
+    """Existing document URL has a different content_kind than requested."""
 
 
 STATUS_DRY_RUN = "dry_run"
@@ -131,15 +138,20 @@ def _get_or_create_document(
 ) -> Document:
     """Return the document for ``url_normalized``, creating it if needed.
 
-    Existing rows are reused as-is. ``primary_source_id`` is first-owner
-    provenance and must not be rewritten when another approved source later
-    fetches the same URL. Per-fetch attribution lives on
-    ``document_versions.fetched_via_source_id``.
+    Existing rows are reused as-is when ``content_kind`` matches.
+    ``primary_source_id`` is first-owner provenance and must not be rewritten
+    when another approved source later fetches the same URL. Per-fetch
+    attribution lives on ``document_versions.fetched_via_source_id``.
     """
     existing = session.scalar(
         select(Document).where(Document.url_normalized == url_normalized)
     )
     if existing is not None:
+        if existing.content_kind != content_kind:
+            raise ContentKindConflictError(
+                f"document_id={existing.id} content_kind={existing.content_kind!r} "
+                f"conflicts with requested {content_kind!r} for {url_normalized}"
+            )
         return existing
 
     doc = Document(
@@ -155,6 +167,122 @@ def _get_or_create_document(
     session.add(doc)
     session.flush()
     return doc
+
+
+def _pace_host(
+    *,
+    host: str,
+    delay_seconds: float,
+    last_host_fetch_at: dict[str, float] | None,
+) -> None:
+    if not host or last_host_fetch_at is None:
+        return
+    last = last_host_fetch_at.get(host)
+    if last is None:
+        return
+    wait = delay_seconds - (time.monotonic() - last)
+    if wait > 0:
+        time.sleep(wait)
+
+
+def _persist_version(
+    session: Session,
+    *,
+    source: Source,
+    requested_url: str,
+    url_normalized: str,
+    discovery_status: str,
+    content_kind: str,
+    body: bytes,
+    content_type: str | None,
+    http_status: int | None,
+    final_url: str | None,
+    storage_root: Path,
+    extension: str,
+    default_content_type: str,
+    success_message: str,
+) -> SeedFetchResult:
+    """Write a new document version file + row, or report unchanged/conflict."""
+    digest = hashlib.sha256(body).hexdigest()
+    try:
+        document = _get_or_create_document(
+            session,
+            source,
+            canonical_url=requested_url,
+            url_normalized=url_normalized,
+            discovery_status=discovery_status,
+            content_kind=content_kind,
+        )
+    except ContentKindConflictError as exc:
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=requested_url,
+            status=STATUS_FAILED,
+            content_sha256=digest,
+            http_status=http_status,
+            final_url=final_url,
+            message=str(exc),
+        )
+
+    if content_matches_current(session, document.id, digest):
+        session.flush()
+        return SeedFetchResult(
+            source_id=source.id,
+            source_name=source.name,
+            seed_url=requested_url,
+            status=STATUS_UNCHANGED,
+            document_id=document.id,
+            content_sha256=digest,
+            http_status=http_status,
+            final_url=final_url,
+            message="content hash matches current version; no new version created",
+        )
+
+    version_number = _next_version_number(session, document.id)
+    abs_path = version_file_path(
+        storage_root, document.id, version_number, extension=extension
+    )
+    rel_path = relative_storage_path(storage_root, abs_path)
+
+    write_bytes_atomic(abs_path, body)
+    try:
+        version = DocumentVersion(
+            document_id=document.id,
+            fetched_via_source_id=source.id,
+            version_number=version_number,
+            source_url=final_url or requested_url,
+            content_type=content_type or default_content_type,
+            language=source.default_language,
+            retrieved_at=datetime.now(timezone.utc),
+            http_status=http_status,
+            content_sha256=digest,
+            byte_size=len(body),
+            storage_path=rel_path,
+            is_current=False,
+        )
+        session.add(version)
+        session.flush()
+        set_current_version(session, version)
+        session.flush()
+    except Exception:
+        delete_quiet(abs_path)
+        raise
+
+    return SeedFetchResult(
+        source_id=source.id,
+        source_name=source.name,
+        seed_url=requested_url,
+        status=STATUS_FETCHED_NEW_VERSION,
+        document_id=document.id,
+        version_id=version.id,
+        version_number=version_number,
+        content_sha256=digest,
+        storage_path=rel_path,
+        http_status=http_status,
+        final_url=final_url,
+        message=success_message,
+    )
 
 
 def _persist_html_version(
@@ -190,73 +318,21 @@ def _persist_html_version(
             ),
         )
 
-    digest = hashlib.sha256(html_body).hexdigest()
-    document = _get_or_create_document(
+    return _persist_version(
         session,
-        source,
-        canonical_url=requested_url,
+        source=source,
+        requested_url=requested_url,
         url_normalized=url_normalized,
         discovery_status=discovery_status,
         content_kind="html_page",
-    )
-
-    if content_matches_current(session, document.id, digest):
-        session.flush()
-        return SeedFetchResult(
-            source_id=source.id,
-            source_name=source.name,
-            seed_url=requested_url,
-            status=STATUS_UNCHANGED,
-            document_id=document.id,
-            content_sha256=digest,
-            http_status=http_status,
-            final_url=final_url,
-            message="content hash matches current version; no new version created",
-        )
-
-    version_number = _next_version_number(session, document.id)
-    abs_path = version_file_path(
-        storage_root, document.id, version_number, extension="html"
-    )
-    rel_path = relative_storage_path(storage_root, abs_path)
-
-    write_bytes_atomic(abs_path, html_body)
-    try:
-        version = DocumentVersion(
-            document_id=document.id,
-            fetched_via_source_id=source.id,
-            version_number=version_number,
-            source_url=final_url or requested_url,
-            content_type=_content_type_or_html(content_type),
-            language=source.default_language,
-            retrieved_at=datetime.now(timezone.utc),
-            http_status=http_status,
-            content_sha256=digest,
-            byte_size=len(html_body),
-            storage_path=rel_path,
-            is_current=False,
-        )
-        session.add(version)
-        session.flush()
-        set_current_version(session, version)
-        session.flush()
-    except Exception:
-        delete_quiet(abs_path)
-        raise
-
-    return SeedFetchResult(
-        source_id=source.id,
-        source_name=source.name,
-        seed_url=requested_url,
-        status=STATUS_FETCHED_NEW_VERSION,
-        document_id=document.id,
-        version_id=version.id,
-        version_number=version_number,
-        content_sha256=digest,
-        storage_path=rel_path,
+        body=html_body,
+        content_type=content_type,
         http_status=http_status,
         final_url=final_url,
-        message="stored new HTML document version",
+        storage_root=storage_root,
+        extension="html",
+        default_content_type="text/html",
+        success_message="stored new HTML document version",
     )
 
 
@@ -325,12 +401,13 @@ def fetch_html_document_url(
 
     host = urlsplit(url_normalized).hostname or ""
     if apply_rate_limit and last_host_fetch_at is not None and host:
-        delay = policy.default_crawl_delay_seconds
-        last = last_host_fetch_at.get(host)
-        if last is not None:
-            wait = delay - (time.monotonic() - last)
-            if wait > 0:
-                time.sleep(wait)
+        robots = check_robots(url_normalized, policy=policy, client=http_client)
+        delay = effective_crawl_delay(robots, policy)
+        _pace_host(
+            host=host,
+            delay_seconds=delay,
+            last_host_fetch_at=last_host_fetch_at,
+        )
 
     html = fetch_html_seed(
         url_normalized,
@@ -389,81 +466,26 @@ def _persist_binary_version(
             message=f"unsupported binary content_kind={content_kind!r}",
         )
 
-    digest = hashlib.sha256(body).hexdigest()
-    document = _get_or_create_document(
+    default_type = (
+        "application/pdf"
+        if content_kind == "pdf"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return _persist_version(
         session,
-        source,
-        canonical_url=requested_url,
+        source=source,
+        requested_url=requested_url,
         url_normalized=url_normalized,
         discovery_status=discovery_status,
         content_kind=content_kind,
-    )
-
-    if content_matches_current(session, document.id, digest):
-        session.flush()
-        return SeedFetchResult(
-            source_id=source.id,
-            source_name=source.name,
-            seed_url=requested_url,
-            status=STATUS_UNCHANGED,
-            document_id=document.id,
-            content_sha256=digest,
-            http_status=http_status,
-            final_url=final_url,
-            message="content hash matches current version; no new version created",
-        )
-
-    version_number = _next_version_number(session, document.id)
-    abs_path = version_file_path(
-        storage_root,
-        document.id,
-        version_number,
-        extension=content_kind,
-    )
-    rel_path = relative_storage_path(storage_root, abs_path)
-
-    write_bytes_atomic(abs_path, body)
-    try:
-        version = DocumentVersion(
-            document_id=document.id,
-            fetched_via_source_id=source.id,
-            version_number=version_number,
-            source_url=final_url or requested_url,
-            content_type=content_type
-            or (
-                "application/pdf"
-                if content_kind == "pdf"
-                else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ),
-            language=source.default_language,
-            retrieved_at=datetime.now(timezone.utc),
-            http_status=http_status,
-            content_sha256=digest,
-            byte_size=len(body),
-            storage_path=rel_path,
-            is_current=False,
-        )
-        session.add(version)
-        session.flush()
-        set_current_version(session, version)
-        session.flush()
-    except Exception:
-        delete_quiet(abs_path)
-        raise
-
-    return SeedFetchResult(
-        source_id=source.id,
-        source_name=source.name,
-        seed_url=requested_url,
-        status=STATUS_FETCHED_NEW_VERSION,
-        document_id=document.id,
-        version_id=version.id,
-        version_number=version_number,
-        content_sha256=digest,
-        storage_path=rel_path,
+        body=body,
+        content_type=content_type,
         http_status=http_status,
         final_url=final_url,
-        message=f"stored new {content_kind} document version",
+        storage_root=storage_root,
+        extension=content_kind,
+        default_content_type=default_type,
+        success_message=f"stored new {content_kind} document version",
     )
 
 
@@ -539,12 +561,13 @@ def fetch_binary_document_url(
 
     host = urlsplit(url_normalized).hostname or ""
     if apply_rate_limit and last_host_fetch_at is not None and host:
-        delay = policy.default_crawl_delay_seconds
-        last = last_host_fetch_at.get(host)
-        if last is not None:
-            wait = delay - (time.monotonic() - last)
-            if wait > 0:
-                time.sleep(wait)
+        robots = check_robots(url_normalized, policy=policy, client=http_client)
+        delay = effective_crawl_delay(robots, policy)
+        _pace_host(
+            host=host,
+            delay_seconds=delay,
+            last_host_fetch_at=last_host_fetch_at,
+        )
 
     fetched = fetch_binary_url(
         url_normalized,
@@ -633,11 +656,11 @@ def fetch_approved_seed(
     host = urlsplit(source.seed_url).hostname or ""
     if apply_rate_limit and last_host_fetch_at is not None and host:
         delay = plan_entry.crawl_delay_seconds or policy.default_crawl_delay_seconds
-        last = last_host_fetch_at.get(host)
-        if last is not None:
-            wait = delay - (time.monotonic() - last)
-            if wait > 0:
-                time.sleep(wait)
+        _pace_host(
+            host=host,
+            delay_seconds=delay,
+            last_host_fetch_at=last_host_fetch_at,
+        )
 
     html = fetch_html_seed(
         source.seed_url,
@@ -673,8 +696,33 @@ def fetch_approved_seed(
     )
 
 
-def _content_type_or_html(value: str | None) -> str:
-    return value or "text/html"
+
+def commit_fetch_result(
+    session: Session,
+    result: SeedFetchResult,
+    *,
+    storage_root: Path | str | None = None,
+) -> SeedFetchResult:
+    """Commit one fetch result; on failure roll back and remove orphan files."""
+    root = data_root(storage_root)
+    try:
+        session.commit()
+    except Exception as exc:  # noqa: BLE001 — surface as failed fetch
+        session.rollback()
+        if result.storage_path:
+            delete_quiet(root / result.storage_path)
+        return SeedFetchResult(
+            source_id=result.source_id,
+            source_name=result.source_name,
+            seed_url=result.seed_url,
+            status=STATUS_FAILED,
+            document_id=result.document_id,
+            content_sha256=result.content_sha256,
+            http_status=result.http_status,
+            final_url=result.final_url,
+            message=f"commit failed after persist: {exc}",
+        )
+    return result
 
 
 def fetch_approved_seeds(
@@ -685,8 +733,13 @@ def fetch_approved_seeds(
     policy: CrawlPolicy | None = None,
     http_client=None,
     storage_root: Path | str | None = None,
+    commit_each: bool = False,
 ) -> SeedFetchReport:
-    """Fetch one approved source or all approved sources."""
+    """Fetch one approved source or all approved sources.
+
+    When ``persist`` and ``commit_each`` are both True, each seed is committed
+    before the next begins so a later failure cannot roll back earlier writes.
+    """
     policy = policy or fetcher_policy()
     report = SeedFetchReport()
     host_times: dict[str, float] = {}
@@ -713,5 +766,9 @@ def fetch_approved_seeds(
             apply_rate_limit=persist,
             last_host_fetch_at=host_times,
         )
+        if persist and commit_each:
+            result = commit_fetch_result(
+                session, result, storage_root=storage_root
+            )
         report.results.append(result)
     return report

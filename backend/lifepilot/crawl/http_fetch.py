@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 import certifi
 import httpx
 
+from lifepilot.crawl.content_type import content_type_base
 from lifepilot.crawl.net_safety import url_has_blocked_fetch_host
 from lifepilot.crawl.policy import CrawlPolicy
 from lifepilot.crawl.robots import check_robots
@@ -28,14 +29,8 @@ class HtmlFetchResult:
     error: str | None = None
 
 
-def _content_type_base(value: str | None) -> str | None:
-    if not value:
-        return None
-    return value.split(";", 1)[0].strip().lower()
-
-
 def _is_html_content_type(content_type: str | None) -> bool:
-    base = _content_type_base(content_type)
+    base = content_type_base(content_type)
     return base in _HTML_TYPES if base else False
 
 

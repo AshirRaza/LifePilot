@@ -8,15 +8,17 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lifepilot.crawl.discover import _resolve_crawl_source, _safe_read_stored_html
+from lifepilot.crawl.discover import resolve_crawl_source
 from lifepilot.crawl.fetcher import (
     STATUS_DRY_RUN,
     SeedFetchResult,
+    commit_fetch_result,
     fetch_binary_document_url,
 )
 from lifepilot.crawl.links import ExtractedLink, discover_links_from_html
 from lifepilot.crawl.policy import CrawlPolicy, fetcher_policy
-from lifepilot.crawl.storage import data_root
+from lifepilot.crawl.source_docs import document_for_source_seed
+from lifepilot.crawl.storage import data_root, safe_read_bytes
 from lifepilot.db.current_version import get_current_version
 from lifepilot.db.models import Document, Source
 
@@ -50,12 +52,6 @@ class BinaryDiscoveryReport:
         return results
 
 
-def _document_for_source_seed(session: Session, source: Source) -> Document | None:
-    return session.scalar(
-        select(Document).where(Document.url_normalized == source.seed_url_normalized)
-    )
-
-
 def _html_parents_for_source(
     session: Session,
     source: Source,
@@ -71,7 +67,7 @@ def _html_parents_for_source(
     """
     docs: list[Document] = []
     seen: set[int] = set()
-    seed_doc = _document_for_source_seed(session, source)
+    seed_doc = document_for_source_seed(session, source)
     if seed_doc is not None and seed_doc.discovery_status != "rejected":
         docs.append(seed_doc)
         seen.add(seed_doc.id)
@@ -103,6 +99,7 @@ def discover_binaries_for_source(
     http_client=None,
     storage_root: Path | str | None = None,
     include_discovered_html: bool = True,
+    commit_each: bool = False,
 ) -> BinaryDiscoveryReport:
     """Discover PDF/DOCX links from stored HTML under an approved crawl source.
 
@@ -143,7 +140,7 @@ def discover_binaries_for_source(
 
     for parent in parents:
         # Ensure crawl source is the selected source (not inherited owner scope).
-        crawl_source, err = _resolve_crawl_source(
+        crawl_source, err = resolve_crawl_source(
             session, parent, crawl_source_id=source.id
         )
         if crawl_source is None:
@@ -155,7 +152,7 @@ def discover_binaries_for_source(
         if not current.storage_path.endswith(".html"):
             continue
         try:
-            raw = _safe_read_stored_html(root, current.storage_path)
+            raw = safe_read_bytes(root, current.storage_path)
         except (OSError, ValueError):
             continue
         html = raw.decode("utf-8", errors="replace")
@@ -226,6 +223,10 @@ def discover_binaries_for_source(
             apply_rate_limit=True,
             last_host_fetch_at=host_times,
         )
+        if commit_each:
+            result = commit_fetch_result(
+                session, result, storage_root=root
+            )
         report.fetch_results.append(result)
 
     return report

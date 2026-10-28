@@ -94,6 +94,53 @@ def _mock_client(
 def test_fetcher_user_agent_is_transparent():
     assert "LifePilotFetcher" in FETCHER_USER_AGENT
     assert "Mozilla" not in FETCHER_USER_AGENT
+    assert "HTML/PDF/DOCX" in FETCHER_USER_AGENT
+
+
+def test_content_kind_conflict_rejects_without_new_version(db_session, tmp_path: Path):
+    """Reuse of url_normalized must fail when content_kind conflicts."""
+    from lifepilot.crawl.fetcher import fetch_binary_document_url
+
+    _clear_registry(db_session)
+    source = _approve_one(db_session)
+    html = b"<html><body>seed</body></html>"
+    first = fetch_approved_seed(
+        db_session,
+        source.id,
+        persist=True,
+        http_client=_mock_client(html=html),
+        storage_root=tmp_path,
+        policy=fetcher_policy(),
+    )
+    db_session.flush()
+    assert first.status == STATUS_FETCHED_NEW_VERSION
+    assert first.document_id is not None
+
+    # Force same normalized URL as the seed HTML document.
+    doc = db_session.get(Document, first.document_id)
+    assert doc is not None
+    pdf_url = doc.url_normalized
+    conflict = fetch_binary_document_url(
+        db_session,
+        source,
+        url=pdf_url,
+        expected_kind="pdf",
+        persist=True,
+        http_client=_mock_client(
+            html=b"%PDF-1.4 conflict",
+            content_type="application/pdf",
+        ),
+        storage_root=tmp_path,
+        policy=fetcher_policy(),
+    )
+    db_session.flush()
+
+    assert conflict.status == STATUS_FAILED
+    assert "content_kind" in conflict.message
+    assert conflict.version_id is None
+    assert db_session.scalar(select(func.count()).select_from(DocumentVersion)) == 1
+    db_session.refresh(doc)
+    assert doc.content_kind == "html_page"
 
 
 def test_dry_run_does_not_persist(db_session, tmp_path: Path):

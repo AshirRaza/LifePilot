@@ -53,10 +53,9 @@ def main() -> int:
             source_id=args.source_id,
             policy=policy,
             storage_root=args.data_dir,
+            commit_each=args.persist,
         )
-        if args.persist:
-            session.commit()
-        else:
+        if not args.persist:
             session.rollback()
 
     mode = "persist" if args.persist else "dry-run"
