@@ -20,7 +20,7 @@ from lifepilot.extract.schema import (
 )
 
 EXTRACTOR_NAME = "html_structured"
-EXTRACTOR_VERSION = "1.1.0"
+EXTRACTOR_VERSION = "1.2.0"
 
 # Prefer these roots when present (government sites).
 _MAIN_SELECTORS = (
@@ -29,11 +29,16 @@ _MAIN_SELECTORS = (
     "article",
     "[role='main']",
     "#content",
+    "#MainContent",
     "#main-content",
     ".main-content",
     "#main",
 )
 
+# Tags removed wholesale. ``form`` is intentionally absent: many government
+# sites (MOM, ASP.NET Home Affairs / DETE) wrap the entire page body in a
+# form; stripping it destroyed main content. Interactive controls remain
+# listed and are still removed.
 _STRIP_TAGS = frozenset(
     {
         "script",
@@ -45,7 +50,6 @@ _STRIP_TAGS = frozenset(
         "canvas",
         "object",
         "embed",
-        "form",
         "button",
         "input",
         "select",
@@ -62,6 +66,7 @@ _BOILERPLATE_ROLES = frozenset(
 )
 
 # Substring match against id/class (lowercased). Keep conservative.
+# Avoid bare "feedback": USCIS wraps ``<main>`` in ``class="… feedback …"``.
 _BOILERPLATE_TOKENS = (
     "cookie",
     "cookie-banner",
@@ -83,8 +88,11 @@ _BOILERPLATE_TOKENS = (
     "skiplink",
     "phase-banner",
     "govuk-phase-banner",
-    "feedback",
     "gem-c-feedback",
+    "adminfeedback",
+    "feedback-message",
+    "feedback-block",
+    "block-adminfeedback",
     "print-link",
     "back-to-top",
     "sticky-element",
@@ -116,16 +124,50 @@ def _is_boilerplate(tag: Tag) -> bool:
     return any(token in blob for token in _BOILERPLATE_TOKENS)
 
 
+def _main_content_anchors(soup: BeautifulSoup) -> list[Tag]:
+    """Tags that identify primary page content (never strip their ancestors)."""
+    anchors: list[Tag] = []
+    seen: set[int] = set()
+    for selector in _MAIN_SELECTORS:
+        for tag in soup.select(selector):
+            if not isinstance(tag, Tag):
+                continue
+            key = id(tag)
+            if key in seen:
+                continue
+            seen.add(key)
+            anchors.append(tag)
+    return anchors
+
+
+def _contains_main_anchor(tag: Tag, anchors: list[Tag]) -> bool:
+    for anchor in anchors:
+        if tag is anchor:
+            return True
+        try:
+            if anchor in tag.descendants:
+                return True
+        except (ValueError, AttributeError):
+            continue
+    return False
+
+
 def _strip_noise(soup: BeautifulSoup) -> None:
     # Collect first, then decompose — mutating while iterating leaves detached
     # tags whose attrs become None under BeautifulSoup.
+    # Never remove a node that wraps a main-content anchor (e.g. USCIS layout
+    # div with class "feedback" that also contains ``<main>``).
+    anchors = _main_content_anchors(soup)
     to_remove: list[Tag] = []
     for tag in soup.find_all(True):
         if not isinstance(tag, Tag):
             continue
         name = (tag.name or "").lower()
-        if name in _STRIP_TAGS or _is_boilerplate(tag):
-            to_remove.append(tag)
+        if name not in _STRIP_TAGS and not _is_boilerplate(tag):
+            continue
+        if anchors and _contains_main_anchor(tag, anchors):
+            continue
+        to_remove.append(tag)
     for tag in to_remove:
         tag.decompose()
 
@@ -161,9 +203,16 @@ def _visible_text(tag: Tag) -> str:
 
 
 def _is_structural_list_container(tag: Tag) -> bool:
-    """True for ul/ol used as layout shells (e.g. IND accordion), not content lists."""
+    """True for ul/ol used as layout shells, not plain content lists.
+
+    Government pages often wrap section cards in lists (MOM modules, IND
+    accordions). Those contain headings / nested blocks and must be walked,
+    not collapsed into a single list block.
+    """
     blob = _attr_blob(tag)
-    return "accordion" in blob
+    if "accordion" in blob:
+        return True
+    return tag.find(["h1", "h2", "h3", "h4", "h5", "h6"]) is not None
 
 
 def _extract_list(tag: Tag) -> ContentBlock | None:
@@ -223,6 +272,12 @@ def _walk(node: Tag | NavigableString, blocks: list[ContentBlock]) -> None:
     if not isinstance(node, Tag):
         return
     name = (node.name or "").lower()
+    # Page-wrapping ``<form>`` elements are transparent: recurse into children
+    # so ASP.NET / MOM shells do not hide headings and paragraphs.
+    if name == "form":
+        for child in node.children:
+            _walk(child, blocks)
+        return
     if name in _STRIP_TAGS or _is_boilerplate(node):
         return
 

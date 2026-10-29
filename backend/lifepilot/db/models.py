@@ -54,6 +54,16 @@ DOCUMENT_DISCOVERY_STATUSES = ("seed", "discovered", "approved", "rejected")
 DOCUMENT_JURISDICTION_RELEVANCE = ("applicable", "related")
 DOCUMENT_EXTRACTION_STATUSES = ("success", "empty", "failed", "skipped")
 DOCUMENT_COMPARISON_STATUSES = ("unchanged", "changed", "unavailable")
+FRONTIER_DISCOVERY_METHODS = ("seed", "html_link", "sitemap")
+FRONTIER_STATUSES = (
+    "pending",
+    "fetched",
+    "skipped",
+    "blocked",
+    "failed",
+    "out_of_scope",
+)
+FRONTIER_FAILURE_CLASSES = ("transient", "permanent")
 
 
 class Jurisdiction(Base):
@@ -359,11 +369,13 @@ class DocumentContentComparison(Base):
             "extractor_name",
             "extractor_version",
             "algorithm_version",
-            name="uq_document_content_comparisons_pair",
+            "result_revision",
+            name="uq_document_content_comparisons_pair_revision",
         ),
         Index("ix_document_content_comparisons_document_id", "document_id"),
         Index("ix_document_content_comparisons_status", "status"),
         Index("ix_document_content_comparisons_compared_at", "compared_at"),
+        Index("ix_document_content_comparisons_supersedes_id", "supersedes_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -379,6 +391,14 @@ class DocumentContentComparison(Base):
     extractor_name: Mapped[str] = mapped_column(Text, nullable=False)
     extractor_version: Mapped[str] = mapped_column(Text, nullable=False)
     algorithm_version: Mapped[str] = mapped_column(Text, nullable=False)
+    result_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1", default=1
+    )
+    supersedes_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("document_content_comparisons.id"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     previous_content_sha256: Mapped[Optional[str]] = mapped_column(
         CHAR(64), nullable=True
@@ -394,6 +414,93 @@ class DocumentContentComparison(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class DiscoveryFrontier(Base):
+    """Per-source URL discovery queue for resumable BFS crawling.
+
+    Rows are enqueued before fetch. Successful fetches link ``document_id``.
+    Transient failures remain ``pending`` with ``next_attempt_at`` set so they
+    are not lost across runs.
+    """
+
+    __tablename__ = "discovery_frontier"
+    __table_args__ = (
+        CheckConstraint(
+            "discovery_method IN ("
+            + ", ".join(f"'{m}'" for m in FRONTIER_DISCOVERY_METHODS)
+            + ")",
+            name="ck_discovery_frontier_method",
+        ),
+        CheckConstraint(
+            "status IN ("
+            + ", ".join(f"'{s}'" for s in FRONTIER_STATUSES)
+            + ")",
+            name="ck_discovery_frontier_status",
+        ),
+        CheckConstraint(
+            "failure_class IS NULL OR failure_class IN ("
+            + ", ".join(f"'{c}'" for c in FRONTIER_FAILURE_CLASSES)
+            + ")",
+            name="ck_discovery_frontier_failure_class",
+        ),
+        CheckConstraint("depth >= 0", name="ck_discovery_frontier_depth"),
+        CheckConstraint(
+            "attempt_count >= 0", name="ck_discovery_frontier_attempt_count"
+        ),
+        UniqueConstraint(
+            "source_id",
+            "url_normalized",
+            name="uq_discovery_frontier_source_url",
+        ),
+        Index(
+            "ix_discovery_frontier_claim",
+            "source_id",
+            "status",
+            "depth",
+            "id",
+        ),
+        Index("ix_discovery_frontier_document_id", "document_id"),
+        Index("ix_discovery_frontier_next_attempt_at", "next_attempt_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sources.id"), nullable=False
+    )
+    url_normalized: Mapped[str] = mapped_column(Text, nullable=False)
+    url_original: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parent_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    discovery_method: Mapped[str] = mapped_column(Text, nullable=False)
+    depth: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    content_kind_hint: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    last_attempted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    failure_class: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    document_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("documents.id"), nullable=True
+    )
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    source: Mapped[Source] = relationship()
+    document: Mapped[Optional[Document]] = relationship()
 
 
 class DocumentJurisdiction(Base):

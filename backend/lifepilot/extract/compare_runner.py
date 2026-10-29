@@ -537,7 +537,7 @@ def compare_batch(
     return report
 
 
-def _existing_comparison(
+def _latest_comparison(
     session: Session,
     *,
     previous_version_id: int,
@@ -546,14 +546,18 @@ def _existing_comparison(
     extractor_version: str,
     algorithm_version: str,
 ) -> DocumentContentComparison | None:
+    """Return the highest-revision comparison for a version pair."""
     return session.scalar(
-        select(DocumentContentComparison).where(
+        select(DocumentContentComparison)
+        .where(
             DocumentContentComparison.previous_version_id == previous_version_id,
             DocumentContentComparison.current_version_id == current_version_id,
             DocumentContentComparison.extractor_name == extractor_name,
             DocumentContentComparison.extractor_version == extractor_version,
             DocumentContentComparison.algorithm_version == algorithm_version,
         )
+        .order_by(DocumentContentComparison.result_revision.desc())
+        .limit(1)
     )
 
 
@@ -565,7 +569,9 @@ def persist_comparison(
 ) -> ComparisonResult:
     """Persist one comparison result. Idempotent for identical inputs/outcome.
 
-    Never silently overwrites a historical row whose hashes/status differ.
+    When a prior result exists with different status/hashes, append a new
+    ``result_revision`` that supersedes it. Historical rows are never mutated
+    or deleted.
     """
     if result.previous_version_id is None or result.current_version_id is None:
         result.message = "cannot persist: missing version ids"
@@ -575,7 +581,7 @@ def persist_comparison(
         return result
 
     root = data_root(storage_root)
-    existing = _existing_comparison(
+    latest = _latest_comparison(
         session,
         previous_version_id=result.previous_version_id,
         current_version_id=result.current_version_id,
@@ -583,27 +589,23 @@ def persist_comparison(
         extractor_version=result.extractor_version,
         algorithm_version=result.algorithm_version,
     )
-    if existing is not None:
+    if latest is not None:
         same = (
-            existing.status == result.status
-            and existing.previous_content_sha256 == result.previous_content_sha256
-            and existing.current_content_sha256 == result.current_content_sha256
-            and existing.unavailable_reason == result.unavailable_reason
+            latest.status == result.status
+            and latest.previous_content_sha256 == result.previous_content_sha256
+            and latest.current_content_sha256 == result.current_content_sha256
+            and latest.unavailable_reason == result.unavailable_reason
         )
         if same:
-            result.comparison_id = existing.id
-            result.storage_path = existing.storage_path
+            result.comparison_id = latest.id
+            result.storage_path = latest.storage_path
             result.message = (result.message or "comparison unchanged") + " (existing row)"
             return result
-        result.status = STATUS_UNAVAILABLE
-        result.unavailable_reason = (
-            f"historical comparison_id={existing.id} exists with different "
-            f"status/hashes; not overwritten"
-        )
-        result.message = result.unavailable_reason
-        result.comparison_id = existing.id
-        result.storage_path = existing.storage_path
-        return result
+        next_revision = int(latest.result_revision) + 1
+        supersedes_id = latest.id
+    else:
+        next_revision = 1
+        supersedes_id = None
 
     payload = {
         "algorithm_version": result.algorithm_version,
@@ -614,6 +616,8 @@ def persist_comparison(
         "current_version_number": result.current_version_number,
         "extractor_name": result.extractor_name,
         "extractor_version": result.extractor_version,
+        "result_revision": next_revision,
+        "supersedes_id": supersedes_id,
         "status": result.status,
         "previous_content_sha256": result.previous_content_sha256,
         "current_content_sha256": result.current_content_sha256,
@@ -631,6 +635,7 @@ def persist_comparison(
         result.current_version_number or 0,
         extractor_name=result.extractor_name,
         algorithm_version=result.algorithm_version,
+        result_revision=next_revision,
     )
     rel_path = relative_storage_path(root, abs_path)
     write_bytes_atomic(
@@ -647,6 +652,8 @@ def persist_comparison(
             extractor_name=result.extractor_name,
             extractor_version=result.extractor_version,
             algorithm_version=result.algorithm_version,
+            result_revision=next_revision,
+            supersedes_id=supersedes_id,
             status=result.status,
             previous_content_sha256=result.previous_content_sha256,
             current_content_sha256=result.current_content_sha256,
@@ -660,6 +667,11 @@ def persist_comparison(
         delete_quiet(abs_path)
         raise
 
+    if supersedes_id is not None:
+        result.message = (
+            (result.message or result.status)
+            + f" (revision {next_revision}; supersedes comparison_id={supersedes_id})"
+        )
     result.comparison_id = row.id
     result.storage_path = rel_path
     return result

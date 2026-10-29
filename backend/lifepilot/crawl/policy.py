@@ -46,6 +46,15 @@ class CrawlPolicy:
     max_binary_response_bytes: int = 20_000_000
     max_docx_uncompressed_bytes: int = 80_000_000
     binary_request_timeout_seconds: float = 60.0
+    # Phase 6D.2 frontier / sitemap.
+    max_depth: int = 3
+    max_frontier_enqueues_per_source: int = 500
+    max_frontier_attempts: int = 3
+    frontier_backoff_seconds: float = 30.0
+    max_sitemap_fetches_per_source: int = 5
+    max_sitemap_urls_enqueued_per_run: int = 100
+    max_sitemap_response_bytes: int = 5_000_000
+    max_sitemap_index_depth: int = 2
 
 
 def fetcher_policy(
@@ -63,6 +72,14 @@ def fetcher_policy(
     max_binary_response_bytes: int = 20_000_000,
     max_docx_uncompressed_bytes: int = 80_000_000,
     binary_request_timeout_seconds: float = 60.0,
+    max_depth: int = 3,
+    max_frontier_enqueues_per_source: int = 500,
+    max_frontier_attempts: int = 3,
+    frontier_backoff_seconds: float = 30.0,
+    max_sitemap_fetches_per_source: int = 5,
+    max_sitemap_urls_enqueued_per_run: int = 100,
+    max_sitemap_response_bytes: int = 5_000_000,
+    max_sitemap_index_depth: int = 2,
 ) -> CrawlPolicy:
     """Policy for real HTML/binary fetches (transparent fetcher user-agent)."""
     return CrawlPolicy(
@@ -80,4 +97,12 @@ def fetcher_policy(
         max_binary_response_bytes=max_binary_response_bytes,
         max_docx_uncompressed_bytes=max_docx_uncompressed_bytes,
         binary_request_timeout_seconds=binary_request_timeout_seconds,
+        max_depth=max_depth,
+        max_frontier_enqueues_per_source=max_frontier_enqueues_per_source,
+        max_frontier_attempts=max_frontier_attempts,
+        frontier_backoff_seconds=frontier_backoff_seconds,
+        max_sitemap_fetches_per_source=max_sitemap_fetches_per_source,
+        max_sitemap_urls_enqueued_per_run=max_sitemap_urls_enqueued_per_run,
+        max_sitemap_response_bytes=max_sitemap_response_bytes,
+        max_sitemap_index_depth=max_sitemap_index_depth,
     )

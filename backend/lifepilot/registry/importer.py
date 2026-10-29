@@ -16,7 +16,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lifepilot.db.models import Authority, Jurisdiction, Source
-from lifepilot.registry.seeds import AUTHORITIES, JURISDICTIONS, SOURCES, SourceSeed
+from lifepilot.registry.seeds import (
+    AUTHORITIES,
+    JURISDICTIONS,
+    SOURCES,
+    AuthoritySeed,
+    JurisdictionSeed,
+    SourceSeed,
+)
 from lifepilot.registry.urls import (
     InvalidRegistryUrlError,
     path_prefix_pattern,
@@ -119,9 +126,13 @@ def resolve_patterns_for_import(
     )
 
 
-def _upsert_jurisdictions(session: Session, report: ImportReport) -> dict[str, Jurisdiction]:
+def _upsert_jurisdictions(
+    session: Session,
+    report: ImportReport,
+    jurisdictions: tuple[JurisdictionSeed, ...] = JURISDICTIONS,
+) -> dict[str, Jurisdiction]:
     by_code: dict[str, Jurisdiction] = {}
-    for seed in JURISDICTIONS:
+    for seed in jurisdictions:
         existing = session.scalar(
             select(Jurisdiction).where(Jurisdiction.code == seed.code)
         )
@@ -158,9 +169,10 @@ def _upsert_authorities(
     session: Session,
     jurisdictions: dict[str, Jurisdiction],
     report: ImportReport,
+    authorities: tuple[AuthoritySeed, ...] = AUTHORITIES,
 ) -> dict[str, Authority]:
     by_key: dict[str, Authority] = {}
-    for seed in AUTHORITIES:
+    for seed in authorities:
         jurisdiction = jurisdictions[seed.jurisdiction_code]
         existing = session.scalar(
             select(Authority).where(
@@ -297,21 +309,56 @@ def import_seed_sources(
     *,
     verify: bool = True,
     http_client=None,
+    jurisdictions: tuple[JurisdictionSeed, ...] | None = None,
+    authorities: tuple[AuthoritySeed, ...] | None = None,
+    sources: tuple[SourceSeed, ...] | None = None,
 ) -> ImportReport:
     """Upsert curated seeds into the registry. Safe to run repeatedly.
 
     Does not modify ``review_status`` for existing rows and never auto-approves.
+    Optional seed tuples enable configuration-driven imports without changing
+    Python ingestion logic.
     """
-    report = ImportReport()
-    jurisdictions = _upsert_jurisdictions(session, report)
-    authorities = _upsert_authorities(session, jurisdictions, report)
+    jur_seeds = jurisdictions if jurisdictions is not None else JURISDICTIONS
+    auth_seeds = authorities if authorities is not None else AUTHORITIES
+    source_seeds = sources if sources is not None else SOURCES
 
-    for seed in SOURCES:
+    report = ImportReport()
+    jur_rows = _upsert_jurisdictions(session, report, jur_seeds)
+    auth_rows = _upsert_authorities(session, jur_rows, report, auth_seeds)
+
+    for seed in source_seeds:
+        if seed.jurisdiction_code not in jur_rows:
+            report.sources.append(
+                SourceImportResult(
+                    key=seed.key,
+                    seed_url=seed.seed_url,
+                    seed_url_normalized="",
+                    review_status="candidate",
+                    action="skipped_invalid",
+                    error=f"unknown jurisdiction_code={seed.jurisdiction_code!r}",
+                )
+            )
+            continue
+        if seed.authority_key not in auth_rows:
+            # Authority may already exist in DB from a prior import with the same name.
+            # Resolve by jurisdiction + authority seed name if key missing from this batch.
+            report.sources.append(
+                SourceImportResult(
+                    key=seed.key,
+                    seed_url=seed.seed_url,
+                    seed_url_normalized="",
+                    review_status="candidate",
+                    action="skipped_invalid",
+                    error=f"unknown authority_key={seed.authority_key!r} in this import set",
+                )
+            )
+            continue
         result = _upsert_source(
             session,
             seed,
-            jurisdiction=jurisdictions[seed.jurisdiction_code],
-            authority=authorities[seed.authority_key],
+            jurisdiction=jur_rows[seed.jurisdiction_code],
+            authority=auth_rows[seed.authority_key],
             verify=verify,
             http_client=http_client,
         )
@@ -319,6 +366,26 @@ def import_seed_sources(
 
     session.flush()
     return report
+
+
+def import_registry_config(
+    session: Session,
+    *,
+    jurisdictions: tuple[JurisdictionSeed, ...],
+    authorities: tuple[AuthoritySeed, ...],
+    sources: tuple[SourceSeed, ...],
+    verify: bool = True,
+    http_client=None,
+) -> ImportReport:
+    """Import a configuration-driven registry batch (always candidate for new rows)."""
+    return import_seed_sources(
+        session,
+        verify=verify,
+        http_client=http_client,
+        jurisdictions=jurisdictions,
+        authorities=authorities,
+        sources=sources,
+    )
 
 
 def sync_report_review_statuses(session: Session, report: ImportReport) -> ImportReport:

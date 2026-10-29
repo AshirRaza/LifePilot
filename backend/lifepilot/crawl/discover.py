@@ -190,11 +190,14 @@ def discover_from_document(
         return report
 
     host_times: dict[str, float] = {}
-    html_links = report.in_scope_html[: policy.max_discovered_html_fetches_per_run]
-    for link in html_links:
+    fetch_cap = policy.max_discovered_html_fetches_per_run
+    attempted = 0
+    for link in report.in_scope_html:
+        if attempted >= fetch_cap:
+            break
         if not link.url_normalized:
             continue
-        # Skip the parent page itself.
+        # Skip the parent page itself without consuming a fetch slot.
         if link.url_normalized == document.url_normalized:
             report.fetch_results.append(
                 SeedFetchResult(
@@ -224,6 +227,7 @@ def discover_from_document(
                 session, result, storage_root=root
             )
         report.fetch_results.append(result)
+        attempted += 1
 
     return report
 

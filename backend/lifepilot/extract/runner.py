@@ -12,16 +12,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lifepilot.crawl.storage import (
+    backup_existing_file,
     data_root,
     delete_quiet,
     extraction_file_path,
     relative_storage_path,
+    restore_from_backup,
     safe_read_bytes,
     write_bytes_atomic,
 )
 from lifepilot.db.models import Document, DocumentExtraction, DocumentVersion
 from lifepilot.extract import docx_structured, html_structured, pdf_structured
-from lifepilot.extract.schema import StructuredDocument, normalized_content_sha256
+from lifepilot.extract.schema import (
+    SCHEMA_VERSION,
+    StructuredDocument,
+    normalized_content_sha256,
+)
 
 STATUS_DRY_RUN = "dry_run"
 STATUS_SUCCESS = "success"
@@ -29,6 +35,21 @@ STATUS_EMPTY = "empty"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED = "skipped"
 STATUS_UNCHANGED = "unchanged"
+
+
+def schema_version_from_extraction_bytes(raw: bytes) -> int | None:
+    """Return ``schema_version`` from extraction JSON, or None if unreadable."""
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("schema_version")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 KIND_HTML = "html_page"
 KIND_PDF = "pdf"
@@ -184,7 +205,13 @@ def _write_extraction_json(
     document: StructuredDocument,
     content_sha256: str,
     spec: ExtractorSpec,
-) -> str:
+) -> tuple[str, Path, Path | None]:
+    """Write extraction JSON. Returns (rel_path, abs_path, backup_path|None).
+
+    When replacing an existing file, a ``.bak`` copy is kept until the caller
+    confirms the DB write succeeded (then deletes the backup) or failed
+    (then restores the backup).
+    """
     abs_path = extraction_file_path(
         root,
         document_id,
@@ -200,8 +227,9 @@ def _write_extraction_json(
         content_sha256=content_sha256,
     )
     body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    backup = backup_existing_file(abs_path)
     write_bytes_atomic(abs_path, body.encode("utf-8"))
-    return relative_storage_path(root, abs_path)
+    return relative_storage_path(root, abs_path), abs_path, backup
 
 
 def extract_document_version(
@@ -355,17 +383,21 @@ def extract_document_version(
         and existing.storage_path
     ):
         try:
-            safe_read_bytes(root, existing.storage_path)
-            base.status = STATUS_UNCHANGED
-            base.extraction_id = existing.id
-            base.storage_path = existing.storage_path
-            base.message = "extraction unchanged"
-            return base
+            raw_existing = safe_read_bytes(root, existing.storage_path)
+            stored_schema = schema_version_from_extraction_bytes(raw_existing)
+            if stored_schema == SCHEMA_VERSION:
+                base.status = STATUS_UNCHANGED
+                base.extraction_id = existing.id
+                base.storage_path = existing.storage_path
+                base.message = "extraction unchanged"
+                return base
+            # Stale schema_version must be rewritten even when content hash matches.
         except FileNotFoundError:
             pass
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            pass
 
-    previous_path = existing.storage_path if existing is not None else None
-    rel_path = _write_extraction_json(
+    rel_path, abs_path, backup = _write_extraction_json(
         root,
         document_id=document.id,
         version_number=version.version_number,
@@ -377,7 +409,11 @@ def extract_document_version(
     )
     message = None
     if status == STATUS_EMPTY:
-        message = "no content blocks extracted"
+        # Terminal for this extractor_version unless the extractor is upgraded.
+        message = (
+            f"no content blocks extracted "
+            f"(extractor={spec.name}@{spec.version}; not retried until upgrade)"
+        )
     elif structured.empty_pages:
         message = f"empty_pages={list(structured.empty_pages)}"
     try:
@@ -394,11 +430,10 @@ def extract_document_version(
             message=message,
         )
     except Exception:
-        # Avoid orphan JSON when the DB write fails. Same-path overwrite
-        # cannot restore prior bytes; leave the new file for retry.
-        if previous_path != rel_path:
-            delete_quiet(root / rel_path)
+        restore_from_backup(abs_path, backup)
         raise
+    if backup is not None:
+        delete_quiet(backup)
     base.status = status
     base.storage_path = rel_path
     base.extraction_id = row.id

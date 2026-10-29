@@ -24,6 +24,7 @@ class RobotsDecision:
     can_fetch: bool | None
     crawl_delay_seconds: float | None
     error: str | None = None
+    sitemap_urls: tuple[str, ...] = ()
 
     @property
     def summary(self) -> str:
@@ -31,8 +32,30 @@ class RobotsDecision:
             return f"robots_unfetched error={self.error}"
         return (
             f"robots_status={self.status_code} can_fetch={self.can_fetch} "
-            f"crawl_delay={self.crawl_delay_seconds}"
+            f"crawl_delay={self.crawl_delay_seconds} "
+            f"sitemaps={len(self.sitemap_urls)}"
         )
+
+
+def parse_sitemap_directives(robots_body: str) -> list[str]:
+    """Extract ``Sitemap:`` URLs from a robots.txt body (order preserved)."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for raw_line in robots_body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        if key.strip().lower() != "sitemap":
+            continue
+        url = value.strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        found.append(url)
+    return found
 
 
 def robots_url_for(page_url: str) -> str:
@@ -77,6 +100,7 @@ def check_robots(
                 status_code=404,
                 can_fetch=True,
                 crawl_delay_seconds=None,
+                sitemap_urls=(),
             )
         if response.status_code >= 400:
             return RobotsDecision(
@@ -88,15 +112,18 @@ def check_robots(
                 error=f"HTTP {response.status_code}",
             )
 
-        parser = _parse_robots(robots_url, response.text)
+        body = response.text
+        parser = _parse_robots(robots_url, body)
         can_fetch = parser.can_fetch(policy.user_agent, page_url)
         delay = parser.crawl_delay(policy.user_agent)
+        sitemaps = tuple(parse_sitemap_directives(body))
         return RobotsDecision(
             robots_url=robots_url,
             fetched=True,
             status_code=response.status_code,
             can_fetch=can_fetch,
             crawl_delay_seconds=float(delay) if delay is not None else None,
+            sitemap_urls=sitemaps,
         )
     except httpx.HTTPError as exc:
         return RobotsDecision(

@@ -426,9 +426,10 @@ def test_approved_source_patterns_unchanged_across_reimport(db_session):
         )
     )
     assert source is not None
-    # Simulate a previously reviewed narrow scope that differs from a wider proposal.
+    # Simulate a previously reviewed narrower scope that still covers the seed
+    # (exact page only). Curated import proposes a recursive work* pattern.
     source.allowed_url_patterns = [
-        "https://ind.nl/en/residence-permits/work/highly-skilled-migrant*"
+        "https://ind.nl/en/residence-permits/work"
     ]
     set_source_review_status(db_session, source_id=source.id, status="approved")
     db_session.flush()

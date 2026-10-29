@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "description": "Phase 6C.2 candidate government sources for onboarding. All entries import as review_status=candidate. Not approvals.",
+  "jurisdictions": [
+    {"code": "SG", "name": "Singapore", "jurisdiction_type": "country", "country_code": "SG"},
+    {"code": "US", "name": "United States", "jurisdiction_type": "country", "country_code": "US"},
+    {"code": "AU", "name": "Australia", "jurisdiction_type": "country", "country_code": "AU"},
+    {"code": "CA", "name": "Canada", "jurisdiction_type": "country", "country_code": "CA"},
+    {"code": "JP", "name": "Japan", "jurisdiction_type": "country", "country_code": "JP"},
+    {"code": "NZ", "name": "New Zealand", "jurisdiction_type": "country", "country_code": "NZ"},
+    {"code": "AE", "name": "United Arab Emirates", "jurisdiction_type": "country", "country_code": "AE"},
+    {"code": "FR", "name": "France", "jurisdiction_type": "country", "country_code": "FR"},
+    {"code": "IE", "name": "Ireland", "jurisdiction_type": "country", "country_code": "IE"},
+    {"code": "CH", "name": "Switzerland", "jurisdiction_type": "country", "country_code": "CH"}
+  ],
+  "authorities": [
+    {
+      "key": "sg_mom",
+      "jurisdiction_code": "SG",
+      "name": "Ministry of Manpower (MOM)",
+      "short_name": "MOM",
+      "website_url": "https://www.mom.gov.sg/"
+    },
+    {
+      "key": "sg_ica",
+      "jurisdiction_code": "SG",
+      "name": "Immigration & Checkpoints Authority (ICA)",
+      "short_name": "ICA",
+      "website_url": "https://www.ica.gov.sg/"
+    },
+    {
+      "key": "us_uscis",
+      "jurisdiction_code": "US",
+      "name": "U.S. Citizenship and Immigration Services (USCIS)",
+      "short_name": "USCIS",
+      "website_url": "https://www.uscis.gov/"
+    },
+    {
+      "key": "us_dos",
+      "jurisdiction_code": "US",
+      "name": "U.S. Department of State — Bureau of Consular Affairs",
+      "short_name": "DOS",
+      "website_url": "https://travel.state.gov/"
+    },
+    {
+      "key": "au_home_affairs",
+      "jurisdiction_code": "AU",
+      "name": "Australian Department of Home Affairs",
+      "short_name": "Home Affairs",
+      "website_url": "https://www.homeaffairs.gov.au/"
+    },
+    {
+      "key": "ca_ircc",
+      "jurisdiction_code": "CA",
+      "name": "Immigration, Refugees and Citizenship Canada (IRCC)",
+      "short_name": "IRCC",
+      "website_url": "https://www.canada.ca/"
+    },
+    {
+      "key": "jp_isa",
+      "jurisdiction_code": "JP",
+      "name": "Immigration Services Agency of Japan",
+      "short_name": "ISA",
+      "website_url": "https://www.moj.go.jp/isa/"
+    },
+    {
+      "key": "nz_inz",
+      "jurisdiction_code": "NZ",
+      "name": "Immigration New Zealand",
+      "short_name": "INZ",
+      "website_url": "https://www.immigration.govt.nz/"
+    },
+    {
+      "key": "ae_icp",
+      "jurisdiction_code": "AE",
+      "name": "Federal Authority for Identity, Citizenship, Customs & Port Security (ICP)",
+      "short_name": "ICP",
+      "website_url": "https://icp.gov.ae/"
+    },
+    {
+      "key": "fr_france_visas",
+      "jurisdiction_code": "FR",
+      "name": "France-Visas",
+      "short_name": "France-Visas",
+      "website_url": "https://france-visas.gouv.fr/"
+    },
+    {
+      "key": "fr_service_public",
+      "jurisdiction_code": "FR",
+      "name": "Service-Public.fr",
+      "short_name": "Service-Public",
+      "website_url": "https://www.service-public.fr/"
+    },
+    {
+      "key": "ie_isd",
+      "jurisdiction_code": "IE",
+      "name": "Immigration Service Delivery",
+      "short_name": "ISD",
+      "website_url": "https://www.irishimmigration.ie/"
+    },
+    {
+      "key": "ie_enterprise",
+      "jurisdiction_code": "IE",
+      "name": "Department of Enterprise, Trade and Employment",
+      "short_name": "DETE",
+      "website_url": "https://enterprise.gov.ie/"
+    },
+    {
+      "key": "ch_sem",
+      "jurisdiction_code": "CH",
+      "name": "State Secretariat for Migration (SEM)",
+      "short_name": "SEM",
+      "website_url": "https://www.sem.admin.ch/"
+    }
+  ],
+  "sources": [
+    {
+      "key": "sg_mom_employment_pass",
+      "jurisdiction_code": "SG",
+      "authority_key": "sg_mom",
+      "name": "MOM — Employment Pass",
+      "seed_url": "https://www.mom.gov.sg/passes-and-permits/employment-pass",
+      "language": "en",
+      "topics": ["immigration", "employment", "employer-sponsored"],
+      "expected_hosts": ["www.mom.gov.sg", "mom.gov.sg"],
+      "source_type": "html_guidance",
+      "extra_notes": "Priority-1 Singapore skilled employment pass guidance."
+    },
+    {
+      "key": "sg_ica_permanent_residence",
+      "jurisdiction_code": "SG",
+      "authority_key": "sg_ica",
+      "name": "ICA — Becoming a Permanent Resident",
+      "seed_url": "https://www.ica.gov.sg/reside/PR",
+      "language": "en",
+      "topics": ["immigration", "permanent-residence"],
+      "expected_hosts": ["www.ica.gov.sg", "ica.gov.sg"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "us_uscis_working_in_us",
+      "jurisdiction_code": "US",
+      "authority_key": "us_uscis",
+      "name": "USCIS — Working in the United States",
+      "seed_url": "https://www.uscis.gov/working-in-the-united-states",
+      "language": "en",
+      "topics": ["immigration", "employment"],
+      "expected_hosts": ["www.uscis.gov", "uscis.gov"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "us_dos_employment_visas",
+      "jurisdiction_code": "US",
+      "authority_key": "us_dos",
+      "name": "U.S. Department of State — Employment visas",
+      "seed_url": "https://travel.state.gov/content/travel/en/us-visas/employment.html",
+      "language": "en",
+      "topics": ["immigration", "employment", "visas"],
+      "expected_hosts": ["travel.state.gov"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "au_home_affairs_skilled_migration",
+      "jurisdiction_code": "AU",
+      "authority_key": "au_home_affairs",
+      "name": "Home Affairs — Skilled migration program",
+      "seed_url": "https://immi.homeaffairs.gov.au/what-we-do/skilled-migration-program",
+      "language": "en",
+      "topics": ["immigration", "employment", "skilled-migration"],
+      "expected_hosts": ["immi.homeaffairs.gov.au", "www.homeaffairs.gov.au", "homeaffairs.gov.au"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "ca_ircc_express_entry",
+      "jurisdiction_code": "CA",
+      "authority_key": "ca_ircc",
+      "name": "IRCC — Express Entry",
+      "seed_url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/immigrate-canada/express-entry.html",
+      "language": "en",
+      "topics": ["immigration", "permanent-residence", "skilled-migration"],
+      "expected_hosts": ["www.canada.ca", "canada.ca"],
+      "source_type": "html_guidance",
+      "extra_notes": "Complements existing IRCC work-in-Canada seed; remains candidate until explicitly approved."
+    },
+    {
+      "key": "jp_isa_status_of_residence",
+      "jurisdiction_code": "JP",
+      "authority_key": "jp_isa",
+      "name": "ISA — Status of residence (applications)",
+      "seed_url": "https://www.moj.go.jp/isa/applications/status/index.html",
+      "language": "ja",
+      "topics": ["immigration", "employment", "residence"],
+      "expected_hosts": ["www.moj.go.jp", "moj.go.jp"],
+      "source_type": "html_guidance",
+      "extra_notes": "Primary content is Japanese; English machine-toggle (?hl=en) may be available but is not assumed authoritative."
+    },
+    {
+      "key": "nz_inz_work_visas",
+      "jurisdiction_code": "NZ",
+      "authority_key": "nz_inz",
+      "name": "Immigration New Zealand — Visas for working",
+      "seed_url": "https://www.immigration.govt.nz/work/visas-for-working-in-new-zealand/",
+      "language": "en",
+      "topics": ["immigration", "employment"],
+      "expected_hosts": ["www.immigration.govt.nz", "immigration.govt.nz"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "ae_icp_home",
+      "jurisdiction_code": "AE",
+      "authority_key": "ae_icp",
+      "name": "ICP — Official portal (EN)",
+      "seed_url": "https://icp.gov.ae/en/",
+      "language": "en",
+      "topics": ["immigration", "residence", "identity"],
+      "expected_hosts": ["icp.gov.ae", "www.icp.gov.ae"],
+      "source_type": "html_guidance",
+      "extra_notes": "Federal portal entry point; residence/employment pathways may be split across ICP and related official services. Narrow child scopes require manual review before approval."
+    },
+    {
+      "key": "fr_france_visas_en",
+      "jurisdiction_code": "FR",
+      "authority_key": "fr_france_visas",
+      "name": "France-Visas — official visa portal (EN)",
+      "seed_url": "https://france-visas.gouv.fr/en/web/france-visas/",
+      "language": "en",
+      "topics": ["immigration", "visas"],
+      "expected_hosts": ["france-visas.gouv.fr", "www.france-visas.gouv.fr"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "fr_service_public_etrangers",
+      "jurisdiction_code": "FR",
+      "authority_key": "fr_service_public",
+      "name": "Service-Public — Foreigners in France",
+      "seed_url": "https://www.service-public.fr/particuliers/vosdroits/N110",
+      "language": "fr",
+      "topics": ["immigration", "residence", "employment"],
+      "expected_hosts": [
+        "www.service-public.fr",
+        "service-public.fr",
+        "www.service-public.gouv.fr",
+        "service-public.gouv.fr"
+      ],
+      "source_type": "html_guidance",
+      "extra_notes": "French-language official guidance hub for foreigners' rights. Official redirects to service-public.gouv.fr."
+    },
+    {
+      "key": "ie_isd_coming_to_work",
+      "jurisdiction_code": "IE",
+      "authority_key": "ie_isd",
+      "name": "ISD — Coming to work in Ireland",
+      "seed_url": "https://www.irishimmigration.ie/coming-to-work-in-ireland/",
+      "language": "en",
+      "topics": ["immigration", "employment"],
+      "expected_hosts": ["www.irishimmigration.ie", "irishimmigration.ie"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "ie_employment_permits",
+      "jurisdiction_code": "IE",
+      "authority_key": "ie_enterprise",
+      "name": "DETE — Employment permits",
+      "seed_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/",
+      "language": "en",
+      "topics": ["immigration", "employment", "employer-sponsored"],
+      "expected_hosts": ["enterprise.gov.ie", "www.enterprise.gov.ie"],
+      "source_type": "html_guidance"
+    },
+    {
+      "key": "ch_sem_work",
+      "jurisdiction_code": "CH",
+      "authority_key": "ch_sem",
+      "name": "SEM — Work / labour market admission",
+      "seed_url": "https://www.sem.admin.ch/sem/en/home/themen/arbeit.html",
+      "language": "en",
+      "topics": ["immigration", "employment"],
+      "expected_hosts": ["www.sem.admin.ch", "sem.admin.ch"],
+      "source_type": "html_guidance"
+    }
+  ]
+}

@@ -610,7 +610,7 @@ def test_persist_idempotent(db_session, tmp_path: Path):
     assert db_session.scalar(select(func.count()).select_from(DocumentContentComparison)) == 1
 
 
-def test_persist_refuses_silent_overwrite(db_session, tmp_path: Path):
+def test_persist_supersedes_without_overwriting_history(db_session, tmp_path: Path):
     _clear(db_session)
     document, v1, v2, _ = _doc_with_two_versions(
         db_session, tmp_path, prev_html=HTML_BASE, curr_html=HTML_FEE_CHANGED
@@ -619,14 +619,32 @@ def test_persist_refuses_silent_overwrite(db_session, tmp_path: Path):
     result = compare_document_latest(db_session, document.id, storage_root=tmp_path)
     result = persist_comparison(db_session, result, storage_root=tmp_path)
     db_session.flush()
-    # Simulate conflicting re-persist with different status/hashes.
+    first_id = result.comparison_id
+    first_path = result.storage_path
+    assert first_id is not None
+    assert first_path
+    original = (tmp_path / first_path).read_bytes()
+
+    # Simulate a later compatible result that differs from the historical row.
     conflict = result
     conflict.status = STATUS_UNCHANGED
     conflict.previous_content_sha256 = "0" * 64
+    conflict.unavailable_reason = None
     out = persist_comparison(db_session, conflict, storage_root=tmp_path)
-    assert out.status == STATUS_UNAVAILABLE
-    assert "not overwritten" in (out.unavailable_reason or "")
-    assert db_session.scalar(select(func.count()).select_from(DocumentContentComparison)) == 1
+    db_session.flush()
+    assert out.status == STATUS_UNCHANGED
+    assert out.comparison_id != first_id
+    assert "supersedes comparison_id=" in (out.message or "")
+    assert db_session.scalar(select(func.count()).select_from(DocumentContentComparison)) == 2
+    # Historical JSON untouched.
+    assert (tmp_path / first_path).read_bytes() == original
+    hist = db_session.get(DocumentContentComparison, first_id)
+    assert hist is not None
+    assert hist.result_revision == 1
+    latest = db_session.get(DocumentContentComparison, out.comparison_id)
+    assert latest is not None
+    assert latest.result_revision == 2
+    assert latest.supersedes_id == first_id
 
 
 def test_db_failure_cleans_orphan_comparison_file(db_session, tmp_path: Path):

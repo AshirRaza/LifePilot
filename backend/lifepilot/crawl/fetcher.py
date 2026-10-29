@@ -78,6 +78,7 @@ class SeedFetchResult:
     http_status: int | None = None
     final_url: str | None = None
     message: str = ""
+    retry_after_seconds: float | None = None
 
 
 @dataclass
@@ -427,6 +428,7 @@ def fetch_html_document_url(
             http_status=html.status_code,
             final_url=html.final_url,
             message=html.error or "fetch failed",
+            retry_after_seconds=html.retry_after_seconds,
         )
 
     return _persist_html_version(
@@ -680,6 +682,7 @@ def fetch_approved_seed(
             http_status=html.status_code,
             final_url=html.final_url,
             message=html.error or "fetch failed",
+            retry_after_seconds=html.retry_after_seconds,
         )
 
     return _persist_html_version(

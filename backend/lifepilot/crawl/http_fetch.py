@@ -17,6 +17,19 @@ from lifepilot.registry.urls import url_in_any_allowed_pattern
 _HTML_TYPES = {"text/html", "application/xhtml+xml"}
 
 
+def parse_retry_after_seconds(value: str | None) -> float | None:
+    """Parse Retry-After as delta-seconds (HTTP-date ignored → None)."""
+    if not value:
+        return None
+    try:
+        seconds = float(value.strip())
+    except ValueError:
+        return None
+    if seconds < 0:
+        return None
+    return seconds
+
+
 @dataclass
 class HtmlFetchResult:
     ok: bool
@@ -27,6 +40,7 @@ class HtmlFetchResult:
     body: bytes | None = None
     redirect_chain: list[str] = field(default_factory=list)
     error: str | None = None
+    retry_after_seconds: float | None = None
 
 
 def _is_html_content_type(content_type: str | None) -> bool:
@@ -118,6 +132,9 @@ def fetch_html_seed(
                     continue
 
                 if status >= 400:
+                    retry_after = parse_retry_after_seconds(
+                        response.headers.get("retry-after")
+                    )
                     response.close()
                     return HtmlFetchResult(
                         ok=False,
@@ -126,6 +143,7 @@ def fetch_html_seed(
                         status_code=status,
                         redirect_chain=chain,
                         error=f"HTTP {status}",
+                        retry_after_seconds=retry_after,
                     )
 
                 content_type = response.headers.get("content-type")

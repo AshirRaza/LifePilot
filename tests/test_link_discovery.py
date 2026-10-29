@@ -12,6 +12,7 @@ from lifepilot.crawl.discover import discover_from_document, discover_from_sourc
 from lifepilot.crawl.fetcher import (
     STATUS_DRY_RUN,
     STATUS_FETCHED_NEW_VERSION,
+    STATUS_SKIPPED,
     fetch_approved_seed,
     fetch_html_document_url,
 )
@@ -269,6 +270,47 @@ def test_discovered_html_honors_robots_crawl_delay(db_session, tmp_path: Path):
     assert sleep_mock.called
     waited = max(call.args[0] for call in sleep_mock.call_args_list)
     assert waited == pytest.approx(7.0)
+
+
+def test_discover_parent_skip_does_not_consume_fetch_cap(db_session, tmp_path: Path):
+    """Parent URL skip must not use up max_discovered_html_fetches_per_run."""
+    _clear_registry(db_session)
+    source = _approve_one(db_session)
+    # Seed URL itself appears first alphabetically among in-scope HTML links.
+    seed_html = b"""
+    <html><body>
+      <a href="/skilled-worker-visa">Self</a>
+      <a href="/skilled-worker-visa/child-page">Child</a>
+    </body></html>
+    """
+    fetch_approved_seed(
+        db_session,
+        source.id,
+        persist=True,
+        http_client=_mock_client(html=seed_html),
+        storage_root=tmp_path,
+        policy=fetcher_policy(),
+    )
+    db_session.flush()
+
+    report = discover_from_source_seed(
+        db_session,
+        source.id,
+        persist=True,
+        policy=fetcher_policy(max_discovered_html_fetches_per_run=1),
+        http_client=_mock_client(html=b"<html><body>child</body></html>"),
+        storage_root=tmp_path,
+    )
+    db_session.flush()
+    statuses = [r.status for r in report.fetch_results]
+    assert STATUS_SKIPPED in statuses or any(
+        "skipped parent" in (r.message or "") for r in report.fetch_results
+    )
+    assert any(r.status == STATUS_FETCHED_NEW_VERSION for r in report.fetch_results)
+    discovered = db_session.scalars(
+        select(Document).where(Document.discovery_status == "discovered")
+    ).all()
+    assert len(discovered) == 1
 
 
 def test_discover_respects_html_fetch_cap(db_session, tmp_path: Path):

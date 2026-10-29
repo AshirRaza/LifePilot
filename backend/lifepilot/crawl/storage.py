@@ -95,8 +95,13 @@ def comparison_file_path(
     *,
     extractor_name: str,
     algorithm_version: str,
+    result_revision: int = 1,
 ) -> Path:
-    """Absolute path for a persisted content-comparison JSON file."""
+    """Absolute path for a persisted content-comparison JSON file.
+
+    Revision 1 keeps the historical filename. Later revisions append ``.rN`` so
+    historical JSON is never overwritten.
+    """
     safe_extractor = "".join(
         ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in extractor_name
     )
@@ -104,16 +109,13 @@ def comparison_file_path(
         ch if ch.isalnum() or ch in {"-", "_", "."} else "_"
         for ch in algorithm_version
     )
-    return (
-        root
-        / "compared"
-        / "documents"
-        / str(document_id)
-        / (
-            f"v{previous_version_number}_v{current_version_number}."
-            f"{safe_extractor}.cmp{safe_algo}.json"
-        )
+    base = (
+        f"v{previous_version_number}_v{current_version_number}."
+        f"{safe_extractor}.cmp{safe_algo}"
     )
+    if result_revision > 1:
+        base = f"{base}.r{result_revision}"
+    return root / "compared" / "documents" / str(document_id) / f"{base}.json"
 
 
 def relative_storage_path(root: Path, absolute: Path) -> str:
@@ -130,6 +132,23 @@ def write_bytes_atomic(path: Path, content: bytes) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_bytes(content)
     tmp.replace(path)
+
+
+def backup_existing_file(path: Path) -> Path | None:
+    """Copy ``path`` to ``path.bak`` if it exists. Return backup path or None."""
+    if not path.is_file():
+        return None
+    backup = path.with_suffix(path.suffix + ".bak")
+    backup.write_bytes(path.read_bytes())
+    return backup
+
+
+def restore_from_backup(path: Path, backup: Path | None) -> None:
+    """Restore ``path`` from ``backup`` when present; otherwise delete ``path``."""
+    if backup is not None and backup.is_file():
+        backup.replace(path)
+        return
+    delete_quiet(path)
 
 
 def delete_quiet(path: Path) -> None:

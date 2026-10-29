@@ -17,8 +17,9 @@ Phases completed so far:
 9. **Structured HTML extraction** — convert stored HTML versions into ordered JSON blocks (title/headings/paragraphs/lists/tables); raw files unchanged
 10. **Structured PDF/DOCX extraction** — extract searchable text from stored binaries (PDF page provenance; DOCX style hierarchy); no OCR
 11. **Meaningful content comparison** — compare successful extractions across versions (`unchanged` / `changed` / `unavailable`); ignore raw-only diffs; persist structured diffs
+12. **Unified ingestion pipeline** — dry-run/execute orchestration of approved-source fetch → discovery → extract → compare with global safety caps and resumable reruns
 
-Not yet implemented: open crawl, OCR, chunking/embeddings/RAG, API, or frontend.
+Not yet implemented: open crawl, OCR, chunking/embeddings/RAG, API, frontend, or scheduling.
 
 ## Prerequisites
 
@@ -222,7 +223,41 @@ python scripts/compare_documents.py --persist --document-id 99
 
 Statuses: `unchanged` (normalized extracted content identical), `changed` (textual differences), `unavailable` (missing/failed/incompatible extractions — with an explicit reason). Raw SHA-256 differences alone do not imply a meaningful change. Output lives under `data/compared/documents/...` when persisted.
 
-### 14. Run tests
+### 14. Unified ingestion pipeline
+
+One command orchestrates approved-source seed fetch, bounded HTML/PDF/DOCX discovery, structured extraction, and consecutive-version comparison. It reuses the existing crawl/extract/compare modules (no second crawling system).
+
+Modes:
+- `full` (default) — fetch/discover + extract/compare
+- `process-existing` — extract/compare stored raw versions only (**zero HTTP**, including robots.txt)
+
+Dry-run (default — **no network**, no DB/filesystem writes):
+
+```powershell
+$env:PYTHONPATH = "backend"
+python scripts/run_ingestion.py --source-id 86
+python scripts/run_ingestion.py --max-sources 1 --json
+python scripts/run_ingestion.py --mode process-existing --all-approved --json
+```
+
+Execute (explicit opt-in; conservatively bounded):
+
+```powershell
+python scripts/run_ingestion.py --source-id 86 --execute
+python scripts/run_ingestion.py --source-id 86 --execute --max-fetches 5 --max-extractions 10 --max-comparisons 10
+python scripts/run_ingestion.py --mode process-existing --all-approved --execute --max-extractions 20 --max-comparisons 20
+python scripts/run_ingestion.py --all-approved --execute --max-fetches 5
+```
+
+Source selection: one `--source-id`, a bounded `--max-sources` set, or `--all-approved` (deterministic `id` order). Candidate/unapproved sources are never selected.
+
+Default limits: `max_sources=1`, `max_fetches=5`, `max_html_per_source=3`, `max_binary_per_source=2`, `max_extractions=10`, `max_comparisons=10`. Global fetch/extract/compare budgets apply across the whole run (not reset per source). Robots.txt preflight is outside the document-fetch budget.
+
+Resumability: identical raw content does not create duplicate versions; compatible successful extractions are skipped; comparison persistence stays idempotent. Interrupted runs and extraction backlogs can be re-executed safely (`process-existing` until backlog is exhausted). Execute mode writes a JSON summary under `data/runs/` (gitignored) with per-source counts, backlogs, and limit flags.
+
+Does not widen allowlists, bypass bot protection, approve sources, or crawl unbounded.
+
+### 15. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -255,6 +290,12 @@ pytest -v
 | `python scripts/extract_html.py` | Thin HTML-only wrapper around extract_documents |
 | `python scripts/compare_documents.py --document-id N` | Dry-run meaningful content comparison |
 | `python scripts/compare_documents.py --persist --document-id N` | Persist comparison JSON + DB row |
+| `python scripts/run_ingestion.py --source-id N` | Dry-run unified ingestion plan |
+| `python scripts/run_ingestion.py --source-id N --execute` | Bounded fetch/extract/compare run |
+| `python scripts/run_ingestion.py --mode process-existing --all-approved --execute` | Drain extraction/compare backlog (no HTTP) |
+| `python scripts/run_ingestion.py --all-approved --execute` | Multi-source full ingest under global budgets |
+| `python scripts/run_ingestion.py --country SG` | Dry-run approved sources for one jurisdiction/country |
+| `python scripts/import_registry_config.py --config config/registry/global_candidates_6c2.json` | Import candidate countries/sources + approval manifest |
 | `pytest -v` | Run schema + registry + crawl + extract tests |
 
 ### Inspect tables in Postgres
@@ -285,9 +326,10 @@ LifePilot/
 │   ├── db/                      # SQLAlchemy models + session
 │   ├── registry/                # Seed registry (import, verify, review, URL scope)
 │   ├── crawl/                   # Planner, seed fetch, bounded link/binary discovery
-│   └── extract/                 # Structured HTML/PDF/DOCX extraction
-├── data/                        # Raw + extracted files (gitignored)
-├── tests/                       # Schema + registry + crawl + extract tests
+│   ├── extract/                 # Structured HTML/PDF/DOCX extraction + comparison
+│   └── ingest/                  # Unified bounded ingestion orchestration
+├── data/                        # Raw + extracted + compared + run reports (gitignored)
+├── tests/                       # Schema + registry + crawl + extract + ingest tests
 ├── scripts/
 │   ├── run_migrate.py
 │   ├── import_seed_sources.py
@@ -299,7 +341,8 @@ LifePilot/
 │   ├── discover_documents.py
 │   ├── extract_html.py
 │   ├── extract_documents.py
-│   └── compare_documents.py
+│   ├── compare_documents.py
+│   └── run_ingestion.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -343,4 +386,4 @@ LifePilot/
 
 ## Next steps
 
-Chunking/embeddings/RAG over curated extractions, then API/frontend—built incrementally. Do not re-crawl or wipe historical raw/extraction/comparison versions unless explicitly intended.
+Phase 6C multi-source backlog processing (`process-existing`, `--all-approved`), then chunking/embeddings/RAG and API/frontend—built incrementally. Do not wipe historical raw/extraction/comparison versions unless explicitly intended.

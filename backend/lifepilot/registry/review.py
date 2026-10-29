@@ -13,9 +13,10 @@ from lifepilot.db.models import (
 )
 from lifepilot.registry.urls import (
     InvalidRegistryUrlError,
+    normalize_url,
     patterns_expand_scope,
     validate_allowlist_update,
-    validate_seed_and_patterns,
+    validate_http_url,
 )
 
 
@@ -55,13 +56,44 @@ def set_source_review_status(
 
     if status == "approved":
         patterns = list(source.allowed_url_patterns or [])
-        validate_seed_and_patterns(
-            source.seed_url,
-            patterns,
-            require_https=True,
-        )
+        try:
+            # Seed must sit inside the allowlist; patterns may be ancestors of
+            # the seed path (explicit scope) so long as the seed matches.
+            validate_allowlist_update(
+                source.seed_url,
+                patterns,
+                require_https=True,
+            )
+        except InvalidRegistryUrlError as exc:
+            raise ReviewError(str(exc)) from exc
 
     source.review_status = status
+    session.add(source)
+    session.flush()
+    return source
+
+
+def set_source_seed_url(
+    session: Session,
+    *,
+    source_id: int,
+    seed_url: str,
+) -> Source:
+    """Explicitly update ``seed_url`` / ``seed_url_normalized`` for one source.
+
+    Does not change ``review_status``. After a seed change, call
+    ``set_source_allowed_patterns`` so the allowlist still covers the seed.
+    """
+    source = session.get(Source, source_id)
+    if source is None:
+        raise ReviewError("Source not found")
+    try:
+        normalized = validate_http_url(seed_url, require_https=True, allow_http=False)
+    except InvalidRegistryUrlError as exc:
+        raise ReviewError(str(exc)) from exc
+    # Keep original presentation URL when provided; store normalized uniqueness key.
+    source.seed_url = seed_url.strip()
+    source.seed_url_normalized = normalize_url(normalized)
     session.add(source)
     session.flush()
     return source
