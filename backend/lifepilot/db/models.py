@@ -8,9 +8,11 @@ the publishing authority or jurisdiction hierarchy alone.
 per-fetch crawl path. They do not provide complete multi-source discovery
 provenance; a future ``document_source_sightings`` table will cover that.
 
-Content-change detection should compare a new SHA-256 only against the row
-where ``is_current`` is true for that document—not against all historical
-versions. The same hash may reappear later as a new version.
+Raw content-change detection for fetch dedupe compares a new SHA-256 only
+against the row where ``is_current`` is true—not against all historical
+versions. The same raw hash may reappear later as a new version. Meaningful
+guidance changes are detected via ``document_content_comparisons`` over
+successful structured extractions, not raw bytes alone.
 """
 
 from __future__ import annotations
@@ -51,6 +53,7 @@ DOCUMENT_CONTENT_KINDS = ("html_page", "pdf", "docx", "other")
 DOCUMENT_DISCOVERY_STATUSES = ("seed", "discovered", "approved", "rejected")
 DOCUMENT_JURISDICTION_RELEVANCE = ("applicable", "related")
 DOCUMENT_EXTRACTION_STATUSES = ("success", "empty", "failed", "skipped")
+DOCUMENT_COMPARISON_STATUSES = ("unchanged", "changed", "unavailable")
 
 
 class Jurisdiction(Base):
@@ -332,6 +335,64 @@ class DocumentExtraction(Base):
 
     document_version: Mapped[DocumentVersion] = relationship(
         back_populates="extractions"
+    )
+
+
+class DocumentContentComparison(Base):
+    """Meaningful content comparison between two document versions.
+
+    Compares successful structured extractions only. Historical rows are not
+    silently overwritten when re-run with different hashes or status.
+    """
+
+    __tablename__ = "document_content_comparisons"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ("
+            + ", ".join(f"'{s}'" for s in DOCUMENT_COMPARISON_STATUSES)
+            + ")",
+            name="ck_document_content_comparisons_status",
+        ),
+        UniqueConstraint(
+            "previous_version_id",
+            "current_version_id",
+            "extractor_name",
+            "extractor_version",
+            "algorithm_version",
+            name="uq_document_content_comparisons_pair",
+        ),
+        Index("ix_document_content_comparisons_document_id", "document_id"),
+        Index("ix_document_content_comparisons_status", "status"),
+        Index("ix_document_content_comparisons_compared_at", "compared_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    document_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("documents.id"), nullable=False
+    )
+    previous_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=False
+    )
+    current_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=False
+    )
+    extractor_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extractor_version: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm_version: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_content_sha256: Mapped[Optional[str]] = mapped_column(
+        CHAR(64), nullable=True
+    )
+    current_content_sha256: Mapped[Optional[str]] = mapped_column(
+        CHAR(64), nullable=True
+    )
+    storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    unavailable_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    compared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

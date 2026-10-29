@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from lifepilot.db.models import (
     Authority,
     Document,
+    DocumentContentComparison,
     DocumentExtraction,
     DocumentVersion,
     Jurisdiction,
@@ -41,6 +42,7 @@ from lifepilot.registry.verify import DEFAULT_USER_AGENT, VerificationResult, ve
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentContentComparison))
     session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))

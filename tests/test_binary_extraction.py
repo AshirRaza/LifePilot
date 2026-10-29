@@ -15,6 +15,7 @@ from lifepilot.crawl.storage import write_bytes_atomic
 from lifepilot.db.models import (
     Authority,
     Document,
+    DocumentContentComparison,
     DocumentExtraction,
     DocumentVersion,
     Jurisdiction,
@@ -48,6 +49,7 @@ from lifepilot.extract.schema import normalized_content_sha256
 
 
 def _clear(session) -> None:
+    session.execute(delete(DocumentContentComparison))
     session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))

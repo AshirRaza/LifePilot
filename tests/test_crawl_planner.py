@@ -19,6 +19,7 @@ from lifepilot.crawl.robots import check_robots, effective_crawl_delay, robots_u
 from lifepilot.db.models import (
     Authority,
     Document,
+    DocumentContentComparison,
     DocumentExtraction,
     DocumentVersion,
     Jurisdiction,
@@ -29,6 +30,7 @@ from lifepilot.registry.review import set_source_review_status
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentContentComparison))
     session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))

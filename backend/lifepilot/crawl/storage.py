@@ -87,6 +87,35 @@ def extraction_file_path(
     )
 
 
+def comparison_file_path(
+    root: Path,
+    document_id: int,
+    previous_version_number: int,
+    current_version_number: int,
+    *,
+    extractor_name: str,
+    algorithm_version: str,
+) -> Path:
+    """Absolute path for a persisted content-comparison JSON file."""
+    safe_extractor = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in extractor_name
+    )
+    safe_algo = "".join(
+        ch if ch.isalnum() or ch in {"-", "_", "."} else "_"
+        for ch in algorithm_version
+    )
+    return (
+        root
+        / "compared"
+        / "documents"
+        / str(document_id)
+        / (
+            f"v{previous_version_number}_v{current_version_number}."
+            f"{safe_extractor}.cmp{safe_algo}.json"
+        )
+    )
+
+
 def relative_storage_path(root: Path, absolute: Path) -> str:
     """Store paths relative to data root when possible."""
     try:

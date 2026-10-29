@@ -4,6 +4,7 @@ from lifepilot.db.base import Base
 from lifepilot.db.models import (
     Authority,
     Document,
+    DocumentContentComparison,
     DocumentExtraction,
     DocumentJurisdiction,
     DocumentVersion,
@@ -16,6 +17,7 @@ __all__ = [
     "Authority",
     "Base",
     "Document",
+    "DocumentContentComparison",
     "DocumentExtraction",
     "DocumentJurisdiction",
     "DocumentVersion",

@@ -12,6 +12,7 @@ from lifepilot.crawl.storage import write_bytes_atomic
 from lifepilot.db.models import (
     Authority,
     Document,
+    DocumentContentComparison,
     DocumentExtraction,
     DocumentVersion,
     Jurisdiction,
@@ -132,6 +133,7 @@ IND_ACCORDION_HTML = b"""<!DOCTYPE html>
 
 
 def _clear(session) -> None:
+    session.execute(delete(DocumentContentComparison))
     session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))

@@ -16,6 +16,7 @@ Phases completed so far:
 8. **PDF/DOCX download** — discover in-allowlist binary links from stored HTML; validate magic/OOXML; versioned raw storage under `data/raw/`
 9. **Structured HTML extraction** — convert stored HTML versions into ordered JSON blocks (title/headings/paragraphs/lists/tables); raw files unchanged
 10. **Structured PDF/DOCX extraction** — extract searchable text from stored binaries (PDF page provenance; DOCX style hierarchy); no OCR
+11. **Meaningful content comparison** — compare successful extractions across versions (`unchanged` / `changed` / `unavailable`); ignore raw-only diffs; persist structured diffs
 
 Not yet implemented: open crawl, OCR, chunking/embeddings/RAG, API, or frontend.
 
@@ -203,7 +204,25 @@ python scripts/extract_html.py --persist --document-id 99
 
 Output lives under `data/extracted/documents/{document_id}/v{n}.{extractor}.json` (gitignored). Documents with `discovery_status=rejected` are skipped. Raw `data/raw/` files are never rewritten. Re-running the same extractor version with the same content hash is a no-op (`unchanged`); bumping an extractor version updates the current extraction row for that `(document_version_id, extractor_name)`.
 
-### 13. Run tests
+### 13. Meaningful content comparison (from stored extractions)
+
+Compares successful compatible extractions across document versions. Does **not** crawl, download, or extract. Dry-run (default):
+
+```powershell
+python scripts/compare_documents.py --document-id 99
+python scripts/compare_documents.py --previous-version-id A --current-version-id B
+python scripts/compare_documents.py --max-documents 10
+```
+
+Persist comparison JSON + `document_content_comparisons` (explicit opt-in):
+
+```powershell
+python scripts/compare_documents.py --persist --document-id 99
+```
+
+Statuses: `unchanged` (normalized extracted content identical), `changed` (textual differences), `unavailable` (missing/failed/incompatible extractions — with an explicit reason). Raw SHA-256 differences alone do not imply a meaningful change. Output lives under `data/compared/documents/...` when persisted.
+
+### 14. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -234,6 +253,8 @@ pytest -v
 | `python scripts/extract_documents.py` | Dry-run structured extraction (HTML/PDF/DOCX) |
 | `python scripts/extract_documents.py --persist --pdf --document-id N` | Persist extraction JSON + DB row |
 | `python scripts/extract_html.py` | Thin HTML-only wrapper around extract_documents |
+| `python scripts/compare_documents.py --document-id N` | Dry-run meaningful content comparison |
+| `python scripts/compare_documents.py --persist --document-id N` | Persist comparison JSON + DB row |
 | `pytest -v` | Run schema + registry + crawl + extract tests |
 
 ### Inspect tables in Postgres
@@ -277,7 +298,8 @@ LifePilot/
 │   ├── set_source_patterns.py
 │   ├── discover_documents.py
 │   ├── extract_html.py
-│   └── extract_documents.py
+│   ├── extract_documents.py
+│   └── compare_documents.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -293,6 +315,7 @@ LifePilot/
 | `documents` | One row per normalized URL / language variant |
 | `document_versions` | Historical raw snapshots; at most one `is_current` per document |
 | `document_extractions` | Derived structured content per version + extractor (raw files immutable) |
+| `document_content_comparisons` | Meaningful content diffs between two versions (idempotent; no silent overwrite) |
 | `document_jurisdictions` | Explicit applicability (never inferred from hierarchy alone) |
 
 ## Source registry / crawl safety notes
@@ -320,4 +343,4 @@ LifePilot/
 
 ## Next steps
 
-Phase 5C+ (not started here): chunking, embeddings/RAG over curated extractions, then API/frontend—built incrementally. Do not re-crawl or wipe historical raw/extraction versions unless explicitly intended.
+Chunking/embeddings/RAG over curated extractions, then API/frontend—built incrementally. Do not re-crawl or wipe historical raw/extraction/comparison versions unless explicitly intended.

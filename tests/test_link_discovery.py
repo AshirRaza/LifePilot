@@ -20,6 +20,7 @@ from lifepilot.crawl.policy import fetcher_policy
 from lifepilot.db.models import (
     Authority,
     Document,
+    DocumentContentComparison,
     DocumentExtraction,
     DocumentVersion,
     Jurisdiction,
@@ -34,6 +35,7 @@ from lifepilot.registry.urls import normalize_url, path_prefix_pattern
 
 
 def _clear_registry(session) -> None:
+    session.execute(delete(DocumentContentComparison))
     session.execute(delete(DocumentExtraction))
     session.execute(delete(DocumentVersion))
     session.execute(delete(Document))
