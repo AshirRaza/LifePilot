@@ -54,7 +54,7 @@ def assert_artifacts_unchanged(
     return problems
 
 
-def run_phase_6f0(
+def run_evidence_validation(
     *,
     runs_dir: Path | None = None,
     data_dir: Path | None = None,
@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip temp-dir live 6E.1 rerun (still inspects NL/AU metadata if DB up).",
     )
     args = parser.parse_args(argv)
-    paths = run_phase_6f0(
+    paths = run_evidence_validation(
         runs_dir=args.runs_dir,
         data_dir=args.data_dir,
         skip_live_calibration=args.skip_live_calibration,

@@ -128,7 +128,7 @@ def run_tests() -> dict[str, Any]:
         "tests/test_source_expansion.py",
         "tests/test_pathway_inventory.py",
         "tests/test_source_gap_closure.py",
-        "tests/test_discovery_6d8.py",
+        "tests/test_allowlist_exact_discovery.py",
         "-q",
         "--tb=line",
     ]
@@ -179,7 +179,7 @@ def _blocked_pathways(
     return out
 
 
-def run_phase_6h(
+def run_source_expansion(
     *,
     runs_dir: Path | None = None,
     skip_ingestion: bool = False,
@@ -478,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-run analysis/report only; reuse the executed ingestion report (no network).",
     )
     args = parser.parse_args(argv)
-    paths = run_phase_6h(
+    paths = run_source_expansion(
         runs_dir=args.runs_dir,
         skip_ingestion=args.skip_ingestion,
         dry_run_ingestion=args.dry_run_ingestion,

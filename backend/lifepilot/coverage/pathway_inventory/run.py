@@ -77,7 +77,7 @@ def run_tests() -> dict[str, Any]:
         "pytest",
         "tests/test_pathway_inventory.py",
         "tests/test_source_gap_closure.py",
-        "tests/test_discovery_6d8.py",
+        "tests/test_allowlist_exact_discovery.py",
         "-q",
         "--tb=line",
     ]
@@ -92,7 +92,7 @@ def run_tests() -> dict[str, Any]:
     }
 
 
-def run_phase_6g(
+def run_pathway_inventory(
     *,
     runs_dir: Path | None = None,
     skip_ingestion: bool = False,
@@ -202,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run-ingestion", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     args = parser.parse_args(argv)
-    paths = run_phase_6g(
+    paths = run_pathway_inventory(
         runs_dir=args.runs_dir,
         skip_ingestion=args.skip_ingestion,
         dry_run_ingestion=args.dry_run_ingestion,

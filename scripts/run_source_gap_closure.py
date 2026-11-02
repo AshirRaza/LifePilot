@@ -1,4 +1,4 @@
-"""Run Phase 6F.2 approved-source gap closure."""
+"""Run approved-source gap closure and exact-URL ingestion."""
 
 from __future__ import annotations
 

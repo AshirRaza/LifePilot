@@ -33,7 +33,7 @@ class NormalizedEntity:
 
 
 def _config_path() -> Path:
-    return Path(__file__).resolve().parents[4] / "config" / "coverage" / "pathway_normalization_6e1.json"
+    return Path(__file__).resolve().parents[4] / "config" / "coverage" / "pathway_normalization.json"
 
 
 @lru_cache(maxsize=1)

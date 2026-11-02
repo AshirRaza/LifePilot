@@ -336,7 +336,7 @@ pytest -v
 | `python scripts/run_ingestion.py --mode process-existing --all-approved --execute` | Drain extraction/compare backlog (no HTTP) |
 | `python scripts/run_ingestion.py --all-approved --execute` | Multi-source full ingest under global budgets |
 | `python scripts/run_ingestion.py --country SG` | Dry-run approved sources for one jurisdiction/country |
-| `python scripts/import_registry_config.py --config config/registry/global_candidates_6c2.json` | Import candidate countries/sources + approval manifest |
+| `python scripts/import_registry_config.py --config config/registry/global_candidates.json` | Import candidate countries/sources + approval manifest |
 | `python scripts/set_source_patterns.py --source-id N --pattern URL --confirm-expand` | Explicit allowlist widen after review |
 | `python scripts/run_coverage_audit.py` | Country coverage audit inventory/matrix |
 | `python scripts/run_pathway_normalization.py` | Normalize hubs vs true pathways; calibrate denominators |

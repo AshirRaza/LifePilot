@@ -123,7 +123,7 @@ def build_ingestion_report(*, skipped_reason: str) -> dict[str, Any]:
     }
 
 
-def run_phase_6f1(
+def run_evidence_remediation(
     *,
     runs_dir: Path | None = None,
     skip_au_reextract: bool = False,
@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip AU Student 500 re-extract verification against live DB.",
     )
     args = parser.parse_args(argv)
-    paths = run_phase_6f1(
+    paths = run_evidence_remediation(
         runs_dir=args.runs_dir,
         skip_au_reextract=args.skip_au_reextract,
     )

@@ -1,4 +1,4 @@
-"""Run Phase 6E read-only immigration knowledge coverage audit."""
+"""Run read-only immigration knowledge coverage audit."""
 
 from __future__ import annotations
 

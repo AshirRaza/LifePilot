@@ -235,7 +235,7 @@ def run_tests() -> dict[str, Any]:
         "tests/test_source_gap_closure.py",
         "tests/test_evidence_remediation.py",
         "tests/test_evidence_validation.py",
-        "tests/test_discovery_6d8.py",
+        "tests/test_allowlist_exact_discovery.py",
         "-q",
         "--tb=line",
     ]
@@ -253,7 +253,7 @@ def run_tests() -> dict[str, Any]:
     }
 
 
-def run_phase_6f2(
+def run_source_gap_closure(
     *,
     runs_dir: Path | None = None,
     skip_tests: bool = False,
@@ -316,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-dir", type=Path, default=None)
     parser.add_argument("--skip-tests", action="store_true")
     args = parser.parse_args(argv)
-    paths = run_phase_6f2(runs_dir=args.runs_dir, skip_tests=args.skip_tests)
+    paths = run_source_gap_closure(runs_dir=args.runs_dir, skip_tests=args.skip_tests)
     print("Phase 6F.2 approved-source gap closure complete.")
     for key, path in paths.items():
         print(f"  {key}: {path}")

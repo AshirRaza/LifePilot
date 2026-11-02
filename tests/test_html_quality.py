@@ -20,6 +20,7 @@ from lifepilot.crawl.html_quality import (
     assess_html_content,
 )
 from lifepilot.crawl.policy import fetcher_policy
+from lifepilot.db.isolation import clear_registry_tables
 from lifepilot.db.models import (
     Authority,
     Document,
@@ -71,14 +72,7 @@ AMBIGUOUS_HTML = b"""<!DOCTYPE html>
 
 
 def _clear_registry(session) -> None:
-    session.execute(delete(DocumentContentComparison))
-    session.execute(delete(DocumentExtraction))
-    session.execute(delete(DocumentVersion))
-    session.execute(delete(Document))
-    session.execute(delete(Source))
-    session.execute(delete(Authority))
-    session.execute(delete(Jurisdiction))
-    session.flush()
+    clear_registry_tables(session)  # FK-safe (frontier first); test DB only
 
 
 def _approve_one(session) -> Source:

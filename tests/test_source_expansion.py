@@ -46,7 +46,7 @@ from lifepilot.coverage.source_expansion.relevance import (
     ExtractionRecord,
     match_url_to_pathways,
 )
-from lifepilot.coverage.source_expansion.run import PRESERVED, fingerprint, run_phase_6h
+from lifepilot.coverage.source_expansion.run import PRESERVED, fingerprint, run_source_expansion
 from lifepilot.coverage.source_expansion.storage_audit import choose_sample, parse_compose
 from lifepilot.coverage.source_expansion.validate import decide
 from lifepilot.registry.urls import path_prefix_pattern
@@ -657,4 +657,4 @@ def test_historical_artifacts_and_aliases_intact(tmp_path):
 
 def test_run_refuses_to_invent_a_baseline_after_writes(tmp_path):
     with pytest.raises(FileNotFoundError):
-        run_phase_6h(runs_dir=tmp_path, skip_ingestion=True, skip_tests=True)
+        run_source_expansion(runs_dir=tmp_path, skip_ingestion=True, skip_tests=True)

@@ -27,6 +27,7 @@ from lifepilot.crawl.fetcher import (
 )
 from lifepilot.crawl.links import discover_links_from_html, resolve_and_classify_link
 from lifepilot.crawl.policy import fetcher_policy
+from lifepilot.db.isolation import clear_registry_tables
 from lifepilot.db.models import (
     Authority,
     Document,
@@ -42,14 +43,7 @@ from lifepilot.registry.urls import normalize_url, path_prefix_pattern
 
 
 def _clear_registry(session) -> None:
-    session.execute(delete(DocumentContentComparison))
-    session.execute(delete(DocumentExtraction))
-    session.execute(delete(DocumentVersion))
-    session.execute(delete(Document))
-    session.execute(delete(Source))
-    session.execute(delete(Authority))
-    session.execute(delete(Jurisdiction))
-    session.flush()
+    clear_registry_tables(session)  # FK-safe (frontier first); test DB only
 
 
 def _approve_gov_uk(session) -> Source:

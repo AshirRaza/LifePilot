@@ -1,4 +1,4 @@
-"""Run Phase 6H owner-approved coverage expansion and evidence deepening."""
+"""Run owner-approved source expansion and evidence deepening."""
 
 from __future__ import annotations
 

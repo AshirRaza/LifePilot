@@ -128,7 +128,7 @@
       "extractor_version": "1.3.0",
       "behavior": "When DOM blocks < 2 or main text is short, recover HTML fragments from hidden-input / application/json payloads; skip siteData menu blobs; re-walk fragments into headings/paragraphs/lists.",
       "fixture": "tests/fixtures/html/au_sharepoint_pageschema_empty_main.html",
-      "tests": "tests/test_html_extraction_6d1.py"
+      "tests": "tests/test_html_structured_extraction.py"
     },
     "recommendation": "Re-validate AU candidates 11023–11027 with extractor 1.3.0 before approval. Do not approve in this phase."
   }

@@ -16,6 +16,7 @@ from lifepilot.crawl.planner import (
 )
 from lifepilot.crawl.policy import CrawlPolicy
 from lifepilot.crawl.robots import check_robots, effective_crawl_delay, robots_url_for
+from lifepilot.db.isolation import clear_registry_tables
 from lifepilot.db.models import (
     Authority,
     Document,
@@ -30,14 +31,7 @@ from lifepilot.registry.review import set_source_review_status
 
 
 def _clear_registry(session) -> None:
-    session.execute(delete(DocumentContentComparison))
-    session.execute(delete(DocumentExtraction))
-    session.execute(delete(DocumentVersion))
-    session.execute(delete(Document))
-    session.execute(delete(Source))
-    session.execute(delete(Authority))
-    session.execute(delete(Jurisdiction))
-    session.flush()
+    clear_registry_tables(session)  # FK-safe (frontier first); test DB only
 
 
 def _mock_robots_client(body: str, status_code: int = 200) -> MagicMock:

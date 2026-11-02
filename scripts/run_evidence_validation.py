@@ -1,4 +1,4 @@
-"""Run Phase 6F.0 evidence validation and DB reconciliation (read-only)."""
+"""Run evidence validation and DB reconciliation (read-only)."""
 
 from __future__ import annotations
 

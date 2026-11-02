@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import delete, func, select
 
+from lifepilot.db.isolation import clear_registry_tables
 from lifepilot.db.models import (
     Authority,
     Document,
@@ -42,14 +43,7 @@ from lifepilot.registry.verify import DEFAULT_USER_AGENT, VerificationResult, ve
 
 
 def _clear_registry(session) -> None:
-    session.execute(delete(DocumentContentComparison))
-    session.execute(delete(DocumentExtraction))
-    session.execute(delete(DocumentVersion))
-    session.execute(delete(Document))
-    session.execute(delete(Source))
-    session.execute(delete(Authority))
-    session.execute(delete(Jurisdiction))
-    session.flush()
+    clear_registry_tables(session)  # FK-safe (frontier first); test DB only
 
 
 def _mock_client_head(final_url: str, status_code: int = 200) -> MagicMock:

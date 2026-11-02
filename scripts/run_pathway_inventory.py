@@ -1,4 +1,4 @@
-"""Run Phase 6G systematic coverage expansion."""
+"""Run systematic pathway inventory and coverage expansion."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Run Phase 6F.1 targeted evidence remediation."""
+"""Run targeted evidence remediation against the official corpus."""
 
 from __future__ import annotations
 

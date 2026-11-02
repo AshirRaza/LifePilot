@@ -1,4 +1,4 @@
-"""Run Phase 6E.1 coverage audit calibration (read-only)."""
+"""Run pathway normalization and coverage calibration (read-only)."""
 
 from __future__ import annotations
 
