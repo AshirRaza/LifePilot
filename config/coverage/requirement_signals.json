@@ -1,0 +1,246 @@
+{
+  "version": 1,
+  "signals": {
+    "eligibility": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "eligibility",
+        "who can apply",
+        "who may apply",
+        "who qualifies",
+        "requirements",
+        "you must",
+        "criteria",
+        "voorwaarden",
+        "eisen",
+        "wie komt in aanmerking",
+        "voraussetzungen",
+        "berechtigt"
+      ],
+      "keyword_patterns": [
+        "you must",
+        "eligible",
+        "eligibility",
+        "qualify",
+        "meet the requirements",
+        "certificate of sponsorship",
+        "job offer",
+        "enrolled",
+        "in aanmerking",
+        "u moet",
+        "voraussetzung"
+      ]
+    },
+    "required_documents": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "documents you must provide",
+        "documents you need",
+        "supporting documents",
+        "required documents",
+        "what you need",
+        "checklist",
+        "document checklist",
+        "benodigde documenten",
+        "welke documenten",
+        "erforderliche unterlagen",
+        "unterlagen"
+      ],
+      "keyword_patterns": [
+        "passport",
+        "provide documents",
+        "supporting documents",
+        "document checklist",
+        "birth certificate",
+        "certificate of sponsorship",
+        "upload documents",
+        "bewijsstukken",
+        "paspoort",
+        "nachweise"
+      ]
+    },
+    "application_process": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "how to apply",
+        "apply",
+        "application process",
+        "apply online",
+        "making an application",
+        "aanvragen",
+        "hoe aanvragen",
+        "antrag",
+        "beantragen"
+      ],
+      "keyword_patterns": [
+        "how to apply",
+        "submit your application",
+        "apply online",
+        "create an account",
+        "file a petition",
+        "immiaccount",
+        "aanvraag indienen",
+        "online aanvragen"
+      ]
+    },
+    "financial_or_sponsorship": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "sponsorship",
+        "sponsor",
+        "certificate of sponsorship",
+        "financial requirement",
+        "maintenance funds",
+        "salary",
+        "funds",
+        "sponsorship recognition",
+        "erkend referent",
+        "finanzierung",
+        "gehalt"
+      ],
+      "keyword_patterns": [
+        "sponsor",
+        "sponsorship",
+        "certificate of sponsorship",
+        "minimum salary",
+        "financial requirement",
+        "maintenance funds",
+        "bank statements",
+        "recognised sponsor",
+        "erkend referent",
+        "salary threshold"
+      ]
+    },
+    "fees_costs": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "fees",
+        "cost",
+        "how much it costs",
+        "visa fees",
+        "application fee",
+        "kosten",
+        "leges",
+        "gebühren"
+      ],
+      "keyword_patterns": [
+        "fee",
+        "cost",
+        "pay",
+        "immigration health surcharge",
+        "leges",
+        "kosten",
+        "gebühr"
+      ]
+    },
+    "processing_times": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "processing time",
+        "how long",
+        "decision waiting times",
+        "when you get a decision",
+        "beslistermijn",
+        "bearbeitung"
+      ],
+      "keyword_patterns": [
+        "processing time",
+        "working days",
+        "weeks",
+        "decision",
+        "beslistermijn",
+        "how long it takes"
+      ]
+    },
+    "conditions_duration": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "conditions",
+        "how long you can stay",
+        "length of stay",
+        "duration",
+        "visa conditions",
+        "geldigheid",
+        "verblijfsduur"
+      ],
+      "keyword_patterns": [
+        "how long you can stay",
+        "conditions",
+        "extend",
+        "valid for",
+        "length of stay",
+        "work restrictions"
+      ]
+    },
+    "language_requirements": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "knowledge of english",
+        "english language",
+        "language requirement",
+        "language test",
+        "taaleis",
+        "nederlands",
+        "deutschkenntnisse"
+      ],
+      "keyword_patterns": [
+        "english language",
+        "ielts",
+        "toefl",
+        "cefr",
+        "language test",
+        "speak english",
+        "nt2",
+        "inburgering"
+      ]
+    },
+    "health_character": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "health",
+        "character",
+        "tuberculosis",
+        "criminal record",
+        "police certificate",
+        "gezondheid",
+        "antecedenten"
+      ],
+      "keyword_patterns": [
+        "health examination",
+        "tuberculosis",
+        "police certificate",
+        "character",
+        "criminal record",
+        "medical",
+        "gezondheidsverklaring"
+      ]
+    },
+    "dependents": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [
+        "family members",
+        "dependants",
+        "dependents",
+        "partner",
+        "children",
+        "bring your family",
+        "gezinsleden",
+        "partner"
+      ],
+      "keyword_patterns": [
+        "dependent",
+        "dependant",
+        "family member",
+        "partner visa",
+        "spouse",
+        "children",
+        "gezinslid"
+      ]
+    },
+    "official_provenance": {
+      "languages": ["en", "nl", "de"],
+      "heading_patterns": [],
+      "keyword_patterns": []
+    }
+  }
+}

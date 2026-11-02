@@ -1,0 +1,511 @@
+{
+  "schema_version": 1,
+  "description": "Phase 6D.4 verified official government source candidates for coverage expansion. All entries import as review_status=candidate. Not approvals. Existing approved sources are not modified.",
+  "jurisdictions": [
+    {"code": "GB", "name": "United Kingdom", "jurisdiction_type": "country", "country_code": "GB"},
+    {"code": "DE", "name": "Germany", "jurisdiction_type": "country", "country_code": "DE"},
+    {"code": "NL", "name": "Netherlands", "jurisdiction_type": "country", "country_code": "NL"},
+    {"code": "SG", "name": "Singapore", "jurisdiction_type": "country", "country_code": "SG"},
+    {"code": "US", "name": "United States", "jurisdiction_type": "country", "country_code": "US"},
+    {"code": "AU", "name": "Australia", "jurisdiction_type": "country", "country_code": "AU"},
+    {"code": "CA", "name": "Canada", "jurisdiction_type": "country", "country_code": "CA"},
+    {"code": "NZ", "name": "New Zealand", "jurisdiction_type": "country", "country_code": "NZ"},
+    {"code": "AE", "name": "United Arab Emirates", "jurisdiction_type": "country", "country_code": "AE"},
+    {"code": "JP", "name": "Japan", "jurisdiction_type": "country", "country_code": "JP"},
+    {"code": "FR", "name": "France", "jurisdiction_type": "country", "country_code": "FR"},
+    {"code": "IE", "name": "Ireland", "jurisdiction_type": "country", "country_code": "IE"},
+    {"code": "CH", "name": "Switzerland", "jurisdiction_type": "country", "country_code": "CH"},
+    {"code": "EU", "name": "European Union", "jurisdiction_type": "supranational", "country_code": null}
+  ],
+  "authorities": [
+    {
+      "key": "uk_home_office",
+      "jurisdiction_code": "GB",
+      "name": "UK Home Office",
+      "short_name": "HO",
+      "website_url": "https://www.gov.uk/"
+    },
+    {
+      "key": "de_bamf",
+      "jurisdiction_code": "DE",
+      "name": "Federal Office for Migration and Refugees (BAMF)",
+      "short_name": "BAMF",
+      "website_url": "https://www.bamf.de/"
+    },
+    {
+      "key": "de_auswaertiges_amt",
+      "jurisdiction_code": "DE",
+      "name": "Federal Foreign Office (Auswärtiges Amt)",
+      "short_name": "AA",
+      "website_url": "https://www.auswaertiges-amt.de/"
+    },
+    {
+      "key": "nl_ind",
+      "jurisdiction_code": "NL",
+      "name": "Immigration and Naturalisation Service (IND)",
+      "short_name": "IND",
+      "website_url": "https://ind.nl/"
+    },
+    {
+      "key": "sg_ica",
+      "jurisdiction_code": "SG",
+      "name": "Immigration & Checkpoints Authority (ICA)",
+      "short_name": "ICA",
+      "website_url": "https://www.ica.gov.sg/"
+    },
+    {
+      "key": "au_home_affairs",
+      "jurisdiction_code": "AU",
+      "name": "Australian Department of Home Affairs",
+      "short_name": "Home Affairs",
+      "website_url": "https://www.homeaffairs.gov.au/"
+    },
+    {
+      "key": "ca_ircc",
+      "jurisdiction_code": "CA",
+      "name": "Immigration, Refugees and Citizenship Canada (IRCC)",
+      "short_name": "IRCC",
+      "website_url": "https://www.canada.ca/"
+    },
+    {
+      "key": "nz_inz",
+      "jurisdiction_code": "NZ",
+      "name": "Immigration New Zealand",
+      "short_name": "INZ",
+      "website_url": "https://www.immigration.govt.nz/"
+    },
+    {
+      "key": "nz_dia",
+      "jurisdiction_code": "NZ",
+      "name": "Department of Internal Affairs (DIA)",
+      "short_name": "DIA",
+      "website_url": "https://www.govt.nz/"
+    },
+    {
+      "key": "ae_u_ae",
+      "jurisdiction_code": "AE",
+      "name": "UAE Official Portal (u.ae)",
+      "short_name": "u.ae",
+      "website_url": "https://u.ae/"
+    },
+    {
+      "key": "ie_isd",
+      "jurisdiction_code": "IE",
+      "name": "Immigration Service Delivery",
+      "short_name": "ISD",
+      "website_url": "https://www.irishimmigration.ie/"
+    },
+    {
+      "key": "ch_sem",
+      "jurisdiction_code": "CH",
+      "name": "State Secretariat for Migration (SEM)",
+      "short_name": "SEM",
+      "website_url": "https://www.sem.admin.ch/"
+    },
+    {
+      "key": "fr_service_public",
+      "jurisdiction_code": "FR",
+      "name": "Service-Public.fr",
+      "short_name": "Service-Public",
+      "website_url": "https://www.service-public.gouv.fr/"
+    }
+  ],
+  "sources": [
+    {
+      "key": "au_immi_student_500",
+      "jurisdiction_code": "AU",
+      "authority_key": "au_home_affairs",
+      "name": "Home Affairs — Student visa (subclass 500)",
+      "seed_url": "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/student-500",
+      "language": "en",
+      "topics": ["immigration", "student", "visas"],
+      "expected_hosts": ["immi.homeaffairs.gov.au"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 with LifePilot fetcher UA (2026-10-30). Complements narrow skilled-migration approved source."
+    },
+    {
+      "key": "au_immi_family_migration",
+      "jurisdiction_code": "AU",
+      "authority_key": "au_home_affairs",
+      "name": "Home Affairs — Family migration program",
+      "seed_url": "https://immi.homeaffairs.gov.au/what-we-do/family-migration-program",
+      "language": "en",
+      "topics": ["immigration", "family", "partner"],
+      "expected_hosts": ["immi.homeaffairs.gov.au"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "au_immi_citizenship",
+      "jurisdiction_code": "AU",
+      "authority_key": "au_home_affairs",
+      "name": "Home Affairs — Become an Australian citizen",
+      "seed_url": "https://immi.homeaffairs.gov.au/citizenship/become-a-citizen",
+      "language": "en",
+      "topics": ["immigration", "citizenship", "naturalisation"],
+      "expected_hosts": ["immi.homeaffairs.gov.au"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "au_immi_working_in_australia",
+      "jurisdiction_code": "AU",
+      "authority_key": "au_home_affairs",
+      "name": "Home Affairs — Working in Australia",
+      "seed_url": "https://immi.homeaffairs.gov.au/visas/working-in-australia",
+      "language": "en",
+      "topics": ["immigration", "employment", "work-rights"],
+      "expected_hosts": ["immi.homeaffairs.gov.au"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. Broader work hub than skilled-migration-program seed. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "au_immi_skills_in_demand_482",
+      "jurisdiction_code": "AU",
+      "authority_key": "au_home_affairs",
+      "name": "Home Affairs — Skills in Demand visa (subclass 482)",
+      "seed_url": "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/skills-in-demand-visa-subclass-482",
+      "language": "en",
+      "topics": ["immigration", "employment", "employer-sponsored"],
+      "expected_hosts": ["immi.homeaffairs.gov.au"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. Canonical URL after redirect from temporary-skill-shortage-482. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nz_inz_study_visas",
+      "jurisdiction_code": "NZ",
+      "authority_key": "nz_inz",
+      "name": "INZ — Visas for studying",
+      "seed_url": "https://www.immigration.govt.nz/study/study-visas/visas-for-studying-in-new-zealand/",
+      "language": "en",
+      "topics": ["immigration", "student"],
+      "expected_hosts": ["www.immigration.govt.nz", "immigration.govt.nz"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nz_inz_live_residence",
+      "jurisdiction_code": "NZ",
+      "authority_key": "nz_inz",
+      "name": "INZ — Live / residence visas",
+      "seed_url": "https://www.immigration.govt.nz/live/",
+      "language": "en",
+      "topics": ["immigration", "permanent-residence", "skilled-migration"],
+      "expected_hosts": ["www.immigration.govt.nz", "immigration.govt.nz"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. Residence pathways hub. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nz_inz_smc_resident",
+      "jurisdiction_code": "NZ",
+      "authority_key": "nz_inz",
+      "name": "INZ — Skilled Migrant Category Resident Visa",
+      "seed_url": "https://www.immigration.govt.nz/visas/skilled-migrant-category-resident-visa",
+      "language": "en",
+      "topics": ["immigration", "skilled-migration", "permanent-residence"],
+      "expected_hosts": ["www.immigration.govt.nz", "immigration.govt.nz"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nz_inz_bringing_family",
+      "jurisdiction_code": "NZ",
+      "authority_key": "nz_inz",
+      "name": "INZ — Bringing family to New Zealand",
+      "seed_url": "https://www.immigration.govt.nz/process-to-apply/once-you-have-a-visa/bringing-family-to-new-zealand/",
+      "language": "en",
+      "topics": ["immigration", "family", "dependants"],
+      "expected_hosts": ["www.immigration.govt.nz", "immigration.govt.nz"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30. Prefer this over /family/ which 404s."
+    },
+    {
+      "key": "nz_dia_citizenship_apply",
+      "jurisdiction_code": "NZ",
+      "authority_key": "nz_dia",
+      "name": "DIA — How to apply for NZ citizenship",
+      "seed_url": "https://www.govt.nz/browse/passports-citizenship-and-identity/nz-citizenship/how-to-apply-for-nz-citizenship/",
+      "language": "en",
+      "topics": ["immigration", "citizenship"],
+      "expected_hosts": ["www.govt.nz", "govt.nz"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. Citizenship is DIA, not INZ. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "de_bamf_third_country",
+      "jurisdiction_code": "DE",
+      "authority_key": "de_bamf",
+      "name": "BAMF — Immigrants from third countries",
+      "seed_url": "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/zuwandererdrittstaaten-node.html",
+      "language": "en",
+      "topics": ["immigration", "residence", "employment", "family"],
+      "expected_hosts": ["www.bamf.de", "bamf.de"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1 alternative to Radware-blocked Make it in Germany. HTTP 200 verified 2026-10-30 with LifePilot UA. Do not bypass MIIG WAF."
+    },
+    {
+      "key": "de_bamf_work",
+      "jurisdiction_code": "DE",
+      "authority_key": "de_bamf",
+      "name": "BAMF — Working in Germany (third-country)",
+      "seed_url": "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Arbeit/arbeit-node.html",
+      "language": "en",
+      "topics": ["immigration", "employment"],
+      "expected_hosts": ["www.bamf.de", "bamf.de"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "de_bamf_family",
+      "jurisdiction_code": "DE",
+      "authority_key": "de_bamf",
+      "name": "BAMF — Family reunification (third-country)",
+      "seed_url": "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Familie/familie-node.html",
+      "language": "en",
+      "topics": ["immigration", "family"],
+      "expected_hosts": ["www.bamf.de", "bamf.de"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "de_aa_visas_for_germany",
+      "jurisdiction_code": "DE",
+      "authority_key": "de_auswaertiges_amt",
+      "name": "Federal Foreign Office — Visas for Germany",
+      "seed_url": "https://www.auswaertiges-amt.de/en/visa-service/215870-215870",
+      "language": "en",
+      "topics": ["immigration", "visas", "procedures", "fees"],
+      "expected_hosts": ["www.auswaertiges-amt.de", "auswaertiges-amt.de"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30. CDN/Akamai present; monitor for bot-protection interstitials before approval."
+    },
+    {
+      "key": "nl_ind_family_partner",
+      "jurisdiction_code": "NL",
+      "authority_key": "nl_ind",
+      "name": "IND — Family and partner",
+      "seed_url": "https://ind.nl/en/residence-permits/family-and-partner",
+      "language": "en",
+      "topics": ["immigration", "family"],
+      "expected_hosts": ["ind.nl", "www.ind.nl"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. Outside current work/HSM allowlists. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nl_ind_study",
+      "jurisdiction_code": "NL",
+      "authority_key": "nl_ind",
+      "name": "IND — Study residence permits",
+      "seed_url": "https://ind.nl/en/residence-permits/study",
+      "language": "en",
+      "topics": ["immigration", "student"],
+      "expected_hosts": ["ind.nl", "www.ind.nl"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nl_ind_permanent_residence",
+      "jurisdiction_code": "NL",
+      "authority_key": "nl_ind",
+      "name": "IND — Permanent residence permit",
+      "seed_url": "https://ind.nl/en/replace-extend-renew-and-change/permanent-residency/permanent-residence-permit",
+      "language": "en",
+      "topics": ["immigration", "permanent-residence"],
+      "expected_hosts": ["ind.nl", "www.ind.nl"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nl_ind_naturalisation",
+      "jurisdiction_code": "NL",
+      "authority_key": "nl_ind",
+      "name": "IND — Naturalisation",
+      "seed_url": "https://ind.nl/en/dutch-citizenship/becoming-a-dutch-national-through-naturalisation",
+      "language": "en",
+      "topics": ["immigration", "citizenship", "naturalisation"],
+      "expected_hosts": ["ind.nl", "www.ind.nl"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "nl_ind_fees",
+      "jurisdiction_code": "NL",
+      "authority_key": "nl_ind",
+      "name": "IND — Fees / application costs",
+      "seed_url": "https://ind.nl/en/fees-costs-of-an-application",
+      "language": "en",
+      "topics": ["immigration", "fees"],
+      "expected_hosts": ["ind.nl", "www.ind.nl"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-1. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "gb_govuk_student_visa",
+      "jurisdiction_code": "GB",
+      "authority_key": "uk_home_office",
+      "name": "UK — Student visa",
+      "seed_url": "https://www.gov.uk/student-visa",
+      "language": "en-GB",
+      "topics": ["immigration", "student"],
+      "expected_hosts": ["www.gov.uk", "gov.uk"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. Current approved GB scope is Skilled Worker only. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "gb_govuk_family_visa",
+      "jurisdiction_code": "GB",
+      "authority_key": "uk_home_office",
+      "name": "UK — Family visa",
+      "seed_url": "https://www.gov.uk/uk-family-visa",
+      "language": "en-GB",
+      "topics": ["immigration", "family"],
+      "expected_hosts": ["www.gov.uk", "gov.uk"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "gb_govuk_ilr",
+      "jurisdiction_code": "GB",
+      "authority_key": "uk_home_office",
+      "name": "UK — Indefinite leave to remain",
+      "seed_url": "https://www.gov.uk/indefinite-leave-to-remain",
+      "language": "en-GB",
+      "topics": ["immigration", "permanent-residence", "settlement"],
+      "expected_hosts": ["www.gov.uk", "gov.uk"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "gb_govuk_citizenship_ilr",
+      "jurisdiction_code": "GB",
+      "authority_key": "uk_home_office",
+      "name": "UK — Apply for citizenship if you have ILR",
+      "seed_url": "https://www.gov.uk/apply-citizenship-indefinite-leave-to-remain",
+      "language": "en-GB",
+      "topics": ["immigration", "citizenship"],
+      "expected_hosts": ["www.gov.uk", "gov.uk"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "ca_ircc_study",
+      "jurisdiction_code": "CA",
+      "authority_key": "ca_ircc",
+      "name": "IRCC — Study in Canada",
+      "seed_url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/study-canada.html",
+      "language": "en",
+      "topics": ["immigration", "student"],
+      "expected_hosts": ["www.canada.ca", "canada.ca"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. Complements Express Entry + existing work-canada candidate. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "ca_ircc_family_sponsorship",
+      "jurisdiction_code": "CA",
+      "authority_key": "ca_ircc",
+      "name": "IRCC — Family sponsorship",
+      "seed_url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/immigrate-canada/family-sponsorship.html",
+      "language": "en",
+      "topics": ["immigration", "family"],
+      "expected_hosts": ["www.canada.ca", "canada.ca"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "ca_ircc_citizenship",
+      "jurisdiction_code": "CA",
+      "authority_key": "ca_ircc",
+      "name": "IRCC — Canadian citizenship",
+      "seed_url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/canadian-citizenship.html",
+      "language": "en",
+      "topics": ["immigration", "citizenship"],
+      "expected_hosts": ["www.canada.ca", "canada.ca"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "sg_ica_student_pass",
+      "jurisdiction_code": "SG",
+      "authority_key": "sg_ica",
+      "name": "ICA — Student's Pass",
+      "seed_url": "https://www.ica.gov.sg/information-and-e-services/studentpass",
+      "language": "en",
+      "topics": ["immigration", "student"],
+      "expected_hosts": ["www.ica.gov.sg", "ica.gov.sg"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. Canonical after redirect from /enter-depart/studentpass. HTTP 200 verified 2026-10-30. Student Pass is ICA, not MOM."
+    },
+    {
+      "key": "sg_ica_citizenship",
+      "jurisdiction_code": "SG",
+      "authority_key": "sg_ica",
+      "name": "ICA — Singapore citizenship application",
+      "seed_url": "https://www.ica.gov.sg/information-and-e-services/citizenship-and-permanent-residence/citizenship/singapore-citizenship-application",
+      "language": "en",
+      "topics": ["immigration", "citizenship"],
+      "expected_hosts": ["www.ica.gov.sg", "ica.gov.sg"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "ie_isd_study",
+      "jurisdiction_code": "IE",
+      "authority_key": "ie_isd",
+      "name": "ISD — Coming to study in Ireland",
+      "seed_url": "https://www.irishimmigration.ie/coming-to-study-in-ireland/",
+      "language": "en",
+      "topics": ["immigration", "student"],
+      "expected_hosts": ["www.irishimmigration.ie", "irishimmigration.ie"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "ch_sem_residence",
+      "jurisdiction_code": "CH",
+      "authority_key": "ch_sem",
+      "name": "SEM — Residence / stay",
+      "seed_url": "https://www.sem.admin.ch/sem/en/home/themen/aufenthalt.html",
+      "language": "en",
+      "topics": ["immigration", "residence"],
+      "expected_hosts": ["www.sem.admin.ch", "sem.admin.ch"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. Complements approved work seed. HTTP 200 verified 2026-10-30."
+    },
+    {
+      "key": "ch_sem_citizenship",
+      "jurisdiction_code": "CH",
+      "authority_key": "ch_sem",
+      "name": "SEM — How to become a Swiss citizen",
+      "seed_url": "https://www.sem.admin.ch/sem/en/home/integration-einbuergerung/schweizer-werden.html",
+      "language": "en",
+      "topics": ["immigration", "citizenship", "naturalisation"],
+      "expected_hosts": ["www.sem.admin.ch", "sem.admin.ch"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. Search-verified official URL; confirm HTTP at import."
+    },
+    {
+      "key": "ae_uae_residence_visas",
+      "jurisdiction_code": "AE",
+      "authority_key": "ae_u_ae",
+      "name": "UAE portal — Residence visas",
+      "seed_url": "https://u.ae/en/information-and-services/visa-and-emirates-id/residence-visas",
+      "language": "en",
+      "topics": ["immigration", "residence", "visas"],
+      "expected_hosts": ["u.ae", "www.u.ae"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. Narrower than existing ICP portal candidate. HTTP 200 verified 2026-10-30. Prefer over broad icp.gov.ae/en/ home for first crawl."
+    },
+    {
+      "key": "fr_service_public_etrangers_gouv",
+      "jurisdiction_code": "FR",
+      "authority_key": "fr_service_public",
+      "name": "Service-Public — Foreigners in France (gouv.fr)",
+      "seed_url": "https://www.service-public.gouv.fr/particuliers/vosdroits/N110",
+      "language": "fr",
+      "topics": ["immigration", "residence", "employment", "family"],
+      "expected_hosts": ["www.service-public.gouv.fr", "service-public.gouv.fr"],
+      "source_type": "html_guidance",
+      "extra_notes": "Phase 6D.4 priority-2. Canonical host after redirect from service-public.fr. Existing candidate 9088 used old host; this entry locks gouv.fr. HTTP 200 verified 2026-10-30. France-Visas EN portal currently returns HTTP 403 to crawler — do not approve until accessible."
+    }
+  ]
+}

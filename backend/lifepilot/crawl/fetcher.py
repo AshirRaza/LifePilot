@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lifepilot.crawl.binary_fetch import fetch_binary_url
+from lifepilot.crawl.content_language import infer_pdf_language
 from lifepilot.crawl.html_quality import (
     OUTCOME_BLOCKED_BY_BOT_PROTECTION,
     OUTCOME_INVALID_CONTENT,
@@ -202,6 +203,7 @@ def _persist_version(
     extension: str,
     default_content_type: str,
     success_message: str,
+    language: str | None = None,
 ) -> SeedFetchResult:
     """Write a new document version file + row, or report unchanged/conflict."""
     digest = hashlib.sha256(body).hexdigest()
@@ -254,7 +256,7 @@ def _persist_version(
             version_number=version_number,
             source_url=final_url or requested_url,
             content_type=content_type or default_content_type,
-            language=source.default_language,
+            language=language or source.default_language,
             retrieved_at=datetime.now(timezone.utc),
             http_status=http_status,
             content_sha256=digest,
@@ -473,6 +475,7 @@ def _persist_binary_version(
         if content_kind == "pdf"
         else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+    language = infer_pdf_language(body) if content_kind == "pdf" else None
     return _persist_version(
         session,
         source=source,
@@ -485,6 +488,7 @@ def _persist_binary_version(
         http_status=http_status,
         final_url=final_url,
         storage_root=storage_root,
+        language=language,
         extension=content_kind,
         default_content_type=default_type,
         success_message=f"stored new {content_kind} document version",

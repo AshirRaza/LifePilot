@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "description": "Phase 6D.4 proposed allowlist amendments for EXISTING approved sources. Review items only — do not apply automatically. Use scripts/set_source_patterns.py after human approval.",
+  "proposals": [
+    {
+      "priority": 1,
+      "source_id": 9082,
+      "source_name": "Home Affairs — Skilled migration program",
+      "country": "AU",
+      "current_patterns": [
+        "https://immi.homeaffairs.gov.au/what-we-do/skilled-migration-program*"
+      ],
+      "proposed_patterns": [
+        "https://immi.homeaffairs.gov.au/what-we-do/skilled-migration-program*"
+      ],
+      "recommendation": "Prefer NEW candidate sources (student/family/citizenship/working/482) over widening this seed. Optional modest widen only if reviewers want sibling pages under /what-we-do/.",
+      "rationale": "Current pattern yields 1 document. Topic expansion is cleaner as separate seeds with strict prefixes.",
+      "status": "propose_new_sources_instead"
+    },
+    {
+      "priority": 1,
+      "source_id": 9085,
+      "source_name": "Immigration New Zealand — Visas for working",
+      "country": "NZ",
+      "current_patterns": [
+        "https://www.immigration.govt.nz/work/visas-for-working-in-new-zealand*"
+      ],
+      "proposed_patterns": [
+        "https://www.immigration.govt.nz/work/visas-for-working-in-new-zealand*",
+        "https://www.immigration.govt.nz/work*"
+      ],
+      "recommendation": "Optional widen of approved work source to /work* OR approve separate nz_inz_* candidates. Prefer separate candidates for study/live/family/citizenship.",
+      "rationale": "Single-page allowlist exhausted. /work/ hub is accessible (HTTP 200) and stays on immigration.govt.nz.",
+      "status": "awaiting_manual_review"
+    },
+    {
+      "priority": 1,
+      "source_id": 87,
+      "source_name": "Make it in Germany — visa / residence types",
+      "country": "DE",
+      "current_patterns": [
+        "https://www.make-it-in-germany.com/en/visa-residence/types*"
+      ],
+      "proposed_patterns": null,
+      "recommendation": "Do NOT widen. Keep blocked. Approve BAMF + Federal Foreign Office candidates instead. Never bypass Radware.",
+      "rationale": "Seed blocked_by_bot_protection; widening cannot fix WAF.",
+      "status": "blocked_leave_unchanged"
+    },
+    {
+      "priority": 1,
+      "source_id": 92,
+      "source_name": "Make it in Germany — official downloads",
+      "country": "DE",
+      "current_patterns": [
+        "https://www.make-it-in-germany.com/en/looking-for-foreign-professionals/support/downloads*"
+      ],
+      "proposed_patterns": null,
+      "recommendation": "Do NOT widen. Keep blocked. Prefer BAMF alternatives.",
+      "rationale": "Same Radware block as source 87.",
+      "status": "blocked_leave_unchanged"
+    },
+    {
+      "priority": 1,
+      "source_id": 88,
+      "source_name": "IND — work residence permits",
+      "country": "NL",
+      "current_patterns": [
+        "https://ind.nl/en/residence-permits/work*",
+        "https://ind.nl/en/forms/7501.pdf"
+      ],
+      "proposed_patterns": [
+        "https://ind.nl/en/residence-permits/work*",
+        "https://ind.nl/en/forms/7501.pdf"
+      ],
+      "recommendation": "Do not widen work source into family/study/citizenship. Approve separate IND candidates.",
+      "rationale": "Work allowlist already useful (21 docs). Mixing topics weakens provenance and crawl fairness.",
+      "status": "propose_new_sources_instead"
+    },
+    {
+      "priority": 1,
+      "source_id": 89,
+      "source_name": "IND — highly skilled migrant",
+      "country": "NL",
+      "current_patterns": [
+        "https://ind.nl/en/residence-permits/work/highly-skilled-migrant*",
+        "https://ind.nl/en/forms/7511.pdf",
+        "https://ind.nl/en/forms/7514.pdf"
+      ],
+      "proposed_patterns": null,
+      "recommendation": "Leave as-is (genuinely exhausted under narrow HSM scope).",
+      "rationale": "3 docs cover seed + related forms; expansion belongs in new IND topic sources.",
+      "status": "leave_unchanged"
+    },
+    {
+      "priority": 2,
+      "source_id": 86,
+      "source_name": "UK Skilled Worker visa guidance",
+      "country": "GB",
+      "current_patterns": [
+        "https://www.gov.uk/skilled-worker-visa*"
+      ],
+      "proposed_patterns": null,
+      "recommendation": "Do not widen Skilled Worker into all of gov.uk immigration. Approve separate student/family/ILR/citizenship candidates.",
+      "rationale": "gov.uk is huge; path-scoped seeds are safer.",
+      "status": "propose_new_sources_instead"
+    },
+    {
+      "priority": 2,
+      "source_id": 9086,
+      "source_name": "ICP — Official portal (EN) [existing candidate]",
+      "country": "AE",
+      "current_patterns": ["(candidate — portal home)"],
+      "proposed_patterns": null,
+      "recommendation": "Prefer narrower u.ae residence-visas candidate over approving broad ICP home.",
+      "rationale": "Portal home is too broad for first crawl; ICP service-categories URL 404'd during verification.",
+      "status": "prefer_narrower_candidate"
+    },
+    {
+      "priority": 2,
+      "source_id": 9087,
+      "source_name": "France-Visas — official visa portal (EN) [existing candidate]",
+      "country": "FR",
+      "current_patterns": ["(candidate)"],
+      "proposed_patterns": null,
+      "recommendation": "Do not approve until crawler can fetch without HTTP 403. Prefer Service-Public gouv.fr foreigners hub.",
+      "rationale": "france-visas.gouv.fr returned HTTP 403 to LifePilot UA on 2026-10-30.",
+      "status": "accessibility_hold"
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "phase": "6E.1",
+  "entity_types": ["pathway", "information_hub", "unknown_slot"],
+  "entities": [
+    {"original_pathway_id": "gb_skilled_worker", "normalized_id": "gb_skilled_worker", "entity_type": "pathway", "program_identity": "UK Skilled Worker visa"},
+    {"original_pathway_id": "nl_highly_skilled_migrant", "normalized_id": "nl_highly_skilled_migrant", "entity_type": "pathway", "program_identity": "NL Highly skilled migrant residence permit"},
+    {"original_pathway_id": "nl_study", "normalized_id": "nl_student_residence", "entity_type": "pathway", "program_identity": "NL student residence permit"},
+    {"original_pathway_id": "nl_family_partner", "normalized_id": "nl_family_partner", "entity_type": "pathway", "program_identity": "NL family/partner residence"},
+    {"original_pathway_id": "nl_permanent_residence", "normalized_id": "nl_permanent_residence", "entity_type": "pathway", "program_identity": "NL permanent residence permit"},
+    {"original_pathway_id": "nl_naturalisation", "normalized_id": "nl_naturalisation", "entity_type": "pathway", "program_identity": "NL Dutch citizenship by naturalisation"},
+    {"original_pathway_id": "nl_work_permits", "normalized_id": "nl_work_permits_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "IND work residence permits landing"},
+    {"original_pathway_id": "nl_fees", "normalized_id": "nl_fees_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "IND cross-cutting fees page"},
+    {"original_pathway_id": "sg_employment_pass", "normalized_id": "sg_employment_pass", "entity_type": "pathway", "program_identity": "Singapore Employment Pass"},
+    {"original_pathway_id": "sg_permanent_resident", "normalized_id": "sg_permanent_resident", "entity_type": "pathway", "program_identity": "Singapore Permanent Resident"},
+    {"original_pathway_id": "us_h1b", "normalized_id": "us_h1b", "entity_type": "pathway", "program_identity": "US H-1B Specialty Occupations"},
+    {"original_pathway_id": "us_l1a", "normalized_id": "us_l1a", "entity_type": "pathway", "program_identity": "US L-1A Intracompany Transferee"},
+    {"original_pathway_id": "us_l1b", "normalized_id": "us_l1b", "entity_type": "pathway", "program_identity": "US L-1B Specialized Knowledge"},
+    {"original_pathway_id": "us_o1", "normalized_id": "us_o1", "entity_type": "pathway", "program_identity": "US O-1 Extraordinary Ability"},
+    {"original_pathway_id": "us_e2", "normalized_id": "us_e2", "entity_type": "pathway", "program_identity": "US E-2 Treaty Investors"},
+    {"original_pathway_id": "us_e3", "normalized_id": "us_e3", "entity_type": "pathway", "program_identity": "US E-3 Specialty Occupation (Australia)"},
+    {"original_pathway_id": "us_eb1", "normalized_id": "us_eb1", "entity_type": "pathway", "program_identity": "US EB-1 First Preference"},
+    {"original_pathway_id": "us_eb2", "normalized_id": "us_eb2", "entity_type": "pathway", "program_identity": "US EB-2 Second Preference"},
+    {"original_pathway_id": "us_eb3", "normalized_id": "us_eb3", "entity_type": "pathway", "program_identity": "US EB-3 Third Preference"},
+    {"original_pathway_id": "us_eb5", "normalized_id": "us_eb5", "entity_type": "pathway", "program_identity": "US EB-5 Immigrant Investor"},
+    {"original_pathway_id": "us_working_hub", "normalized_id": "us_working_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "USCIS working-in-US landing"},
+    {"original_pathway_id": "us_students_exchange", "normalized_id": "us_students_exchange_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "USCIS students/exchange overview"},
+    {"original_pathway_id": "au_student_500", "normalized_id": "au_student_500", "entity_type": "pathway", "program_identity": "Australia Student visa subclass 500"},
+    {"original_pathway_id": "au_skills_in_demand_482", "normalized_id": "au_skills_in_demand_482", "entity_type": "pathway", "program_identity": "Australia Skills in Demand / subclass 482"},
+    {"original_pathway_id": "au_citizenship", "normalized_id": "au_citizenship", "entity_type": "pathway", "program_identity": "Australian citizenship"},
+    {"original_pathway_id": "au_skilled_migration", "normalized_id": "au_skilled_migration_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "Skilled migration program landing"},
+    {"original_pathway_id": "au_family_migration", "normalized_id": "au_family_migration_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "Family migration program landing"},
+    {"original_pathway_id": "au_working_in_australia", "normalized_id": "au_working_in_australia_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "Working in Australia landing"},
+    {"original_pathway_id": "ca_express_entry", "normalized_id": "ca_express_entry_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "IRCC Express Entry system managing FSW/CEC/FST (not a single eligibility pathway)", "notes": ["6G: demoted from pathway; preserve historical ca_express_entry alias"]},
+    {"original_pathway_id": "ca_federal_skilled_worker", "normalized_id": "ca_federal_skilled_worker", "entity_type": "pathway", "program_identity": "Canada Federal Skilled Worker Program", "notes": ["6G split from ca_express_entry; grounded in ingested who-can-apply/federal-skilled-workers.html"]},
+    {"original_pathway_id": "ca_canadian_experience_class", "normalized_id": "ca_canadian_experience_class", "entity_type": "pathway", "program_identity": "Canada Canadian Experience Class", "notes": ["6G split from ca_express_entry; grounded in ingested who-can-apply/canadian-experience-class.html"]},
+    {"original_pathway_id": "ca_federal_skilled_trades", "normalized_id": "ca_federal_skilled_trades", "entity_type": "pathway", "program_identity": "Canada Federal Skilled Trades Program", "notes": ["6G split from ca_express_entry; grounded in ingested who-can-apply/federal-skilled-trades.html"]},
+    {"original_pathway_id": "nz_skilled_migrant", "normalized_id": "nz_skilled_migrant", "entity_type": "pathway", "program_identity": "NZ Skilled Migrant Category Resident Visa"},
+    {"original_pathway_id": "nz_citizenship", "normalized_id": "nz_citizenship_by_grant", "entity_type": "pathway", "program_identity": "New Zealand citizenship by grant (not birth/descent)"},
+    {"original_pathway_id": "nz_citizenship_by_descent", "normalized_id": "nz_citizenship_by_descent", "entity_type": "pathway", "program_identity": "New Zealand citizenship by descent", "notes": ["6G: distinct from grant/birth; eligibility not interchangeable"]},
+    {"original_pathway_id": "nz_citizenship_by_birth", "normalized_id": "nz_citizenship_by_birth", "entity_type": "pathway", "program_identity": "New Zealand citizenship by birth", "notes": ["6G: distinct from grant/descent; eligibility not interchangeable"]},
+    {"original_pathway_id": "nl_eu_long_term_resident", "normalized_id": "nl_eu_long_term_resident", "entity_type": "pathway", "program_identity": "NL residence permit as a long-term EU resident", "notes": ["6G: distinguish from Dutch national permanent residence; requirements differ"]},
+    {"original_pathway_id": "nz_work_visas", "normalized_id": "nz_work_visas_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "INZ work visas landing"},
+    {"original_pathway_id": "nz_study_visas", "normalized_id": "nz_study_visas_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "INZ study visas landing"},
+    {"original_pathway_id": "nz_residence", "normalized_id": "nz_residence_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "INZ live/residence landing"},
+    {"original_pathway_id": "nz_family", "normalized_id": "nz_family_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "INZ bringing family landing"},
+    {"original_pathway_id": "ie_employment_permits", "normalized_id": "ie_employment_permits_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "DETE employment permits landing (not a single legal pathway)"},
+    {"original_pathway_id": "ie_critical_skills_employment_permit", "normalized_id": "ie_critical_skills_employment_permit", "entity_type": "pathway", "program_identity": "Ireland Critical Skills Employment Permit", "notes": ["6F.1 split from ie_employment_permits hub; grounded in ingested doc 2169"]},
+    {"original_pathway_id": "ie_general_employment_permit", "normalized_id": "ie_general_employment_permit", "entity_type": "pathway", "program_identity": "Ireland General Employment Permit", "notes": ["6F.1 split from ie_employment_permits hub; grounded in ingested doc 2168"]},
+    {"original_pathway_id": "ie_coming_to_work", "normalized_id": "ie_coming_to_work_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "ISD coming-to-work landing"},
+    {"original_pathway_id": "de_bamf_family", "normalized_id": "de_family_reunification", "entity_type": "pathway", "program_identity": "Germany family reunification (third-country)"},
+    {"original_pathway_id": "de_bamf_working", "normalized_id": "de_working_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "BAMF working-in-Germany landing"},
+    {"original_pathway_id": "de_bamf_third_country_hub", "normalized_id": "de_third_country_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "BAMF third-country immigrants hub"},
+    {"original_pathway_id": "de_aa_visas", "normalized_id": "de_aa_visas_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "AA visas service landing"},
+    {"original_pathway_id": "de_make_it_in_germany_visa_types", "normalized_id": "de_miig_visa_types_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "Make-it-in-Germany visa types (blocked)"},
+    {"original_pathway_id": "de_make_it_in_germany_downloads", "normalized_id": "de_miig_downloads_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "Make-it-in-Germany downloads (blocked)"},
+    {"original_pathway_id": "ch_work_labour", "normalized_id": "ch_work_labour_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "SEM work/labour market admission"},
+    {"original_pathway_id": "eu_residence", "normalized_id": "eu_residence_hub", "entity_type": "information_hub", "program_identity": null, "hub_role": "Your Europe residence hub"}
+  ],
+  "relevance_profiles": {
+    "gb_skilled_worker": {
+      "identity_tokens": ["skilled worker", "certificate of sponsorship", "cos"],
+      "reject_tokens": ["student visa", "visitor visa", "asylum"]
+    },
+    "nl_highly_skilled_migrant": {
+      "identity_tokens": ["highly skilled migrant", "kennismigrant", "recognised sponsor", "erkend referent"],
+      "reject_tokens": ["tourist", "asylum"]
+    },
+    "nl_student_residence": {
+      "identity_tokens": ["study", "student", "education"],
+      "reject_tokens": ["highly skilled migrant"]
+    },
+    "nl_family_partner": {
+      "identity_tokens": ["family", "partner", "spouse"],
+      "reject_tokens": ["highly skilled migrant", "employment pass"]
+    },
+    "nl_permanent_residence": {
+      "identity_tokens": ["permanent residence", "permanent residency"],
+      "reject_tokens": []
+    },
+    "nl_naturalisation": {
+      "identity_tokens": ["naturalisation", "dutch citizenship", "dutch national"],
+      "reject_tokens": ["highly skilled migrant"]
+    },
+    "sg_employment_pass": {
+      "identity_tokens": ["employment pass"],
+      "reject_tokens": ["work permit", "s pass"]
+    },
+    "sg_permanent_resident": {
+      "identity_tokens": ["permanent resident", "pr application"],
+      "reject_tokens": ["employment pass eligibility"]
+    },
+    "us_h1b": {
+      "identity_tokens": ["h-1b", "h1b", "specialty occupation"],
+      "reject_tokens": ["f-1 student", "optional practical training"]
+    },
+    "us_students_exchange_hub": {
+      "identity_tokens": ["student", "exchange visitor", "f-1", "j-1"],
+      "reject_tokens": ["h-1b specialty"]
+    },
+    "au_student_500": {
+      "identity_tokens": ["student visa", "subclass 500", "genuine student", "genuine temporary entrant", "500"],
+      "reject_tokens": ["diplomatic", "who-can-help-with-your-application", "migration agent"],
+      "financial_require_tokens": ["financial", "funds", "money", "cost of living", "oshc", "health insurance", "adequate funds"],
+      "financial_reject_tokens": ["diplomatic", "exemption for", "consular"]
+    },
+    "au_skills_in_demand_482": {
+      "identity_tokens": ["482", "skills in demand", "temporary skill shortage", "sid"],
+      "reject_tokens": ["student visa", "subclass 500"]
+    },
+    "au_citizenship": {
+      "identity_tokens": ["citizenship", "australian citizen"],
+      "reject_tokens": ["student visa"]
+    },
+    "ca_express_entry": {
+      "identity_tokens": ["express entry", "comprehensive ranking system", "crs", "federal skilled"],
+      "reject_tokens": []
+    },
+    "nz_skilled_migrant": {
+      "identity_tokens": ["skilled migrant", "smc"],
+      "reject_tokens": []
+    },
+    "nz_citizenship": {
+      "identity_tokens": ["citizenship", "new zealand citizen"],
+      "reject_tokens": []
+    },
+    "ie_employment_permits": {
+      "identity_tokens": ["employment permit", "critical skills", "general employment"],
+      "reject_tokens": []
+    },
+    "de_family_reunification": {
+      "identity_tokens": ["family reunification", "family", "nachzug"],
+      "reject_tokens": ["make-it-in-germany"]
+    }
+  },
+  "lead_url_rules": {
+    "generic_patterns": [
+      "who-can-help-with-your-application",
+      "visa-pricing-estimator",
+      "visa-scams",
+      "online.immi.gov.au/lusc/login",
+      "visa-finder",
+      "check-twice-submit-once"
+    ],
+    "pathway_url_hints": {
+      "au_student_500": ["student-500", "student/", "genuine"],
+      "au_skills_in_demand_482": ["482", "skills-in-demand", "temporary-skill"],
+      "au_family_migration_hub": ["family-migration", "partner", "parent"],
+      "au_citizenship": ["citizenship"],
+      "au_skilled_migration_hub": ["skilled-migration", "points-tested"]
+    }
+  }
+}

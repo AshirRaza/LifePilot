@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "description": "Phase 6D.5 held-candidate allowlist proposals only. Do NOT apply or approve automatically. Review, then use scripts/set_source_patterns.py and the registry approval workflow after explicit human approval.",
+  "status": "proposals_only",
+  "do_not_approve_yet": [11023, 11024, 11025, 11026, 11027, 11034, 11035, 11040],
+  "proposals": [
+    {
+      "source_id": 11034,
+      "key": "de_bamf_work",
+      "country": "DE",
+      "name": "BAMF — Work / employment for third-country nationals",
+      "seed_url": "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Arbeit/arbeit-node.html",
+      "current_patterns": [
+        "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Arbeit/arbeit-node.html*"
+      ],
+      "proposed_patterns": [
+        "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Arbeit*"
+      ],
+      "rationale": "Current allowlist is filename-scoped to arbeit-node.html and excludes linked detail pages under .../Arbeit/ (e.g. Fachkraft, ICT, Sonstige). A single directory-prefix pattern admits those child pages while remaining under the Arbeit topic branch.",
+      "scope_safety": {
+        "admits": [
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Arbeit/arbeit-node.html",
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Arbeit/<AnyChild>/..."
+        ],
+        "does_not_admit": [
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Familie/...",
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Asyl/... ",
+          "https://www.bamf.de/EN/Themen/Integration/...",
+          "https://www.bamf.de/DE/..."
+        ],
+        "notes": [
+          "Pattern uses Arbeit* after the fixed ZuwandererDrittstaaten/ path — not a bare /Arbeit* anywhere on bamf.de.",
+          "Does not widen the approved BAMF hub seed (11033), which remains filename-scoped to zuwandererdrittstaaten-node.html.",
+          "German-language /DE/ trees remain out of scope."
+        ]
+      },
+      "recommendation": "Apply proposed_patterns, then approve source 11034 in a later phase. Do not approve with the current filename-only pattern."
+    },
+    {
+      "source_id": 11035,
+      "key": "de_bamf_family",
+      "country": "DE",
+      "name": "BAMF — Family reunification for third-country nationals",
+      "seed_url": "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Familie/familie-node.html",
+      "current_patterns": [
+        "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Familie/familie-node.html*"
+      ],
+      "proposed_patterns": [
+        "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Familie*"
+      ],
+      "rationale": "Same filename-scoped issue as work: linked Familie child pages are outside familie-node.html*. Directory prefix Familie* under ZuwandererDrittstaaten covers the family topic tree only.",
+      "scope_safety": {
+        "admits": [
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Familie/familie-node.html",
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Familie/<AnyChild>/..."
+        ],
+        "does_not_admit": [
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Arbeit/...",
+          "https://www.bamf.de/EN/Themen/MigrationAufenthalt/ZuwandererDrittstaaten/Asyl/...",
+          "https://www.bamf.de/EN/Themen/Integration/...",
+          "https://www.bamf.de/DE/..."
+        ],
+        "notes": [
+          "Pattern is scoped under ZuwandererDrittstaaten/Familie* — cannot match unrelated /Familie paths elsewhere on the site.",
+          "Does not overlap the Arbeit proposal (11034) or the approved hub (11033)."
+        ]
+      },
+      "recommendation": "Apply proposed_patterns, then approve source 11035 later. Do not approve with the current filename-only pattern."
+    },
+    {
+      "source_id": 11040,
+      "key": "nl_ind_naturalisation",
+      "country": "NL",
+      "name": "IND — Naturalisation",
+      "seed_url": "https://ind.nl/en/dutch-citizenship/becoming-a-dutch-national-through-naturalisation",
+      "current_patterns": [
+        "https://ind.nl/en/dutch-citizenship/becoming-a-dutch-national-through-naturalisation*"
+      ],
+      "proposed_patterns": [
+        "https://ind.nl/en/dutch-citizenship/becoming-a-dutch-national-through-naturalisation*",
+        "https://ind.nl/en/forms/5013.pdf",
+        "https://ind.nl/en/forms/6075.pdf"
+      ],
+      "linked_from_seed_page": [
+        {
+          "page_href": "https://ind.nl/nl/formulieren/5013.pdf",
+          "title_hint": "Hoe kunt u Nederlander worden? 5013",
+          "preferred_en_url": "https://ind.nl/en/forms/5013.pdf",
+          "en_http_status": 200
+        },
+        {
+          "page_href": "https://ind.nl/nl/formulieren/6075.pdf",
+          "title_hint": "U wordt Nederlander. Wat mag en moet u doen? 6075",
+          "preferred_en_url": "https://ind.nl/en/forms/6075.pdf",
+          "en_http_status": 200
+        }
+      ],
+      "rationale": "The naturalisation HTML seed links two official application/info PDFs. The EN page points at /nl/formulieren/{id}.pdf; matching EN files exist at /en/forms/{id}.pdf (HTTP 200). Enumerate exact PDF URLs instead of opening /en/forms/*.",
+      "scope_safety": {
+        "admits": [
+          "Naturalisation HTML under the seed prefix",
+          "Exactly two form PDFs: 5013.pdf and 6075.pdf under /en/forms/"
+        ],
+        "does_not_admit": [
+          "https://ind.nl/en/forms/ (directory listing / other forms)",
+          "https://ind.nl/en/forms/7501.pdf (work — already on source 88)",
+          "https://ind.nl/en/forms/7511.pdf (HSM — already on source 89)",
+          "Arbitrary PDFs under /nl/formulieren/"
+        ],
+        "notes": [
+          "No wildcard under /en/forms/ — avoids unrestricted forms-directory expansion.",
+          "Optional later: add NL /nl/formulieren/5013.pdf and 6075.pdf only if bilingual storage is desired; EN equivalents are preferred for MVP language scope."
+        ]
+      },
+      "rejected_patterns": [
+        "https://ind.nl/en/forms/*",
+        "https://ind.nl/en/forms/*naturalisation*",
+        "https://ind.nl/nl/formulieren*"
+      ],
+      "recommendation": "Either (a) approve HTML-only with current pattern, or (b) apply proposed_patterns (HTML + two exact EN PDFs) then approve. Do not approve a forms-directory wildcard."
+    }
+  ],
+  "australia_extraction_note": {
+    "held_source_ids": [11023, 11024, 11025, 11026, 11027],
+    "blocker": "SharePoint/ASP.NET visa pages leave <main> empty; guidance HTML is embedded in a PageSchema JSON hidden input.",
+    "fix_landed": {
+      "module": "backend/lifepilot/extract/html_structured.py",
+      "extractor_version": "1.3.0",
+      "behavior": "When DOM blocks < 2 or main text is short, recover HTML fragments from hidden-input / application/json payloads; skip siteData menu blobs; re-walk fragments into headings/paragraphs/lists.",
+      "fixture": "tests/fixtures/html/au_sharepoint_pageschema_empty_main.html",
+      "tests": "tests/test_html_extraction_6d1.py"
+    },
+    "recommendation": "Re-validate AU candidates 11023–11027 with extractor 1.3.0 before approval. Do not approve in this phase."
+  }
+}

@@ -217,6 +217,7 @@ def test_unchanged_html_still_expands_children(db_session, tmp_path: Path):
 
     html = b"""<!DOCTYPE html><html><body>
     <a href="/guidance/visa/child">Child page</a>
+    <a href="/completely/other/path">Out of scope</a>
     </body></html>"""
 
     def fake_fetch(session, src, *, url, **kwargs):
@@ -300,6 +301,7 @@ def test_unchanged_html_still_expands_children(db_session, tmp_path: Path):
             )
     assert report.unchanged >= 1
     assert report.children_enqueued >= 1
+    assert report.out_of_scope_rejected >= 1
     child = db_session.scalar(
         select(DiscoveryFrontier).where(
             DiscoveryFrontier.url_normalized
@@ -309,6 +311,13 @@ def test_unchanged_html_still_expands_children(db_session, tmp_path: Path):
     assert child is not None
     assert child.status == "pending"
     assert child.depth == 1
+    oos = db_session.scalar(
+        select(DiscoveryFrontier).where(
+            DiscoveryFrontier.url_normalized
+            == "https://www.example.test/completely/other/path"
+        )
+    )
+    assert oos is None  # OOS HTML links are counted, not persisted
 
 
 def test_coverage_not_complete_with_pending_or_limits():

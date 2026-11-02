@@ -39,6 +39,7 @@ from lifepilot.crawl.source_docs import document_for_source_seed
 from lifepilot.crawl.storage import data_root, relative_storage_path, write_bytes_atomic
 from lifepilot.db.models import (
     Document,
+    DocumentContentComparison,
     DocumentExtraction,
     DocumentVersion,
     Jurisdiction,
@@ -174,12 +175,14 @@ class IngestRunReport:
     comparisons_unavailable: int = 0
     extraction_backlog_remaining: int | None = None
     comparison_backlog_remaining: int | None = None
+    documents_with_multiple_versions: int | None = None
     frontier_pending_remaining: int | None = None
     frontier_fetched: int = 0
     frontier_skipped: int = 0
     frontier_blocked: int = 0
     frontier_failed: int = 0
     frontier_out_of_scope: int = 0
+    out_of_scope_links_rejected: int = 0
     sitemap_fetches_attempted: int = 0
     sitemap_fetches_ok: int = 0
     sitemap_urls_enqueued: int = 0
@@ -437,9 +440,39 @@ def _documents_comparable(
     return out
 
 
-def _count_comparison_backlog(session: Session, document_ids: list[int]) -> int:
-    """Documents with ≥2 versions (may still be unavailable without extractions)."""
+def _count_documents_with_multiple_versions(
+    session: Session, document_ids: list[int]
+) -> int:
+    """Documents that have at least two stored versions (not a work backlog)."""
     return len(_documents_comparable(session, document_ids, limit=None))
+
+
+def _count_comparison_backlog(session: Session, document_ids: list[int]) -> int:
+    """Latest version pairs that still lack any stored comparison row.
+
+    Distinct from ``documents_with_multiple_versions``: a document with many
+    versions contributes here only when its latest consecutive pair has not
+    been compared yet.
+    """
+    if not document_ids:
+        return 0
+    missing = 0
+    for did in document_ids:
+        pair = latest_two_versions(session, did)
+        if pair is None:
+            continue
+        previous, current = pair
+        exists = session.scalar(
+            select(DocumentContentComparison.id)
+            .where(
+                DocumentContentComparison.previous_version_id == previous.id,
+                DocumentContentComparison.current_version_id == current.id,
+            )
+            .limit(1)
+        )
+        if exists is None:
+            missing += 1
+    return missing
 
 
 def _policy_for_remaining(
@@ -598,12 +631,14 @@ def _dry_run(
     comparable = _documents_comparable(
         session, doc_ids, limit=limits.max_comparisons
     )
+    multi_version = _count_documents_with_multiple_versions(session, doc_ids)
     cmp_backlog = _count_comparison_backlog(session, doc_ids)
     seed_docs = sum(
         1 for s in sources if document_for_source_seed(session, s) is not None
     )
     report.extraction_backlog_remaining = backlog
     report.comparison_backlog_remaining = cmp_backlog
+    report.documents_with_multiple_versions = multi_version
     report.planned = {
         "mode": mode,
         "sources": len(sources),
@@ -623,6 +658,7 @@ def _dry_run(
         "versions_needing_extraction_this_run": len(pending_extract),
         "extraction_backlog_total": backlog,
         "documents_with_consecutive_versions_this_run": len(comparable),
+        "documents_with_multiple_versions": multi_version,
         "comparison_backlog_total": cmp_backlog,
         "fetch_budget": 0 if mode == MODE_PROCESS_EXISTING else limits.max_fetches,
         "extraction_budget": limits.max_extractions,
@@ -704,6 +740,7 @@ def _execute_source(
     report.sitemap_fetches_ok += crawl.sitemap_fetches_ok
     report.sitemap_urls_enqueued += crawl.sitemap_urls_enqueued_pending
     report.frontier_children_enqueued += crawl.children_enqueued
+    report.out_of_scope_links_rejected += crawl.out_of_scope_rejected
     report.frontier_transient_retries += crawl.transient_retries
     report.depth_capped_expansions += crawl.depth_capped_expansions
 
@@ -904,6 +941,9 @@ def _finalize_backlogs(
 ) -> None:
     report.extraction_backlog_remaining = _count_extraction_backlog(
         session, document_ids, storage_root=storage_root
+    )
+    report.documents_with_multiple_versions = (
+        _count_documents_with_multiple_versions(session, document_ids)
     )
     report.comparison_backlog_remaining = _count_comparison_backlog(
         session, document_ids

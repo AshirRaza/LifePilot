@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from lifepilot.crawl.url_filters import is_crawl_trap_url
@@ -358,6 +358,29 @@ def count_pending_due(
     return int(session.scalar(stmt) or 0)
 
 
+def prune_out_of_scope_html_links(
+    session: Session,
+    *,
+    source_ids: list[int] | None = None,
+) -> int:
+    """Delete orphan out-of-scope HTML-link frontier rows.
+
+    Only removes rows with ``status=out_of_scope``, ``discovery_method=html_link``,
+    and ``document_id IS NULL``. Does not touch pending/fetched/blocked/failed
+    or in-scope records, and never deletes documents/versions/extractions/
+    comparisons.
+    """
+    stmt = delete(DiscoveryFrontier).where(
+        DiscoveryFrontier.status == "out_of_scope",
+        DiscoveryFrontier.discovery_method == "html_link",
+        DiscoveryFrontier.document_id.is_(None),
+    )
+    if source_ids:
+        stmt = stmt.where(DiscoveryFrontier.source_id.in_(source_ids))
+    result = session.execute(stmt)
+    return int(result.rowcount or 0)
+
+
 __all__ = [
     "EnqueueResult",
     "claim_pending",
@@ -372,4 +395,5 @@ __all__ = [
     "mark_permanent_failure",
     "mark_skipped",
     "mark_transient_failure",
+    "prune_out_of_scope_html_links",
 ]

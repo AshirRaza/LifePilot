@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lifepilot.crawl.fetcher import (
@@ -19,17 +20,21 @@ from lifepilot.crawl.fetcher import (
     fetch_binary_document_url,
     fetch_html_document_url,
 )
+from lifepilot.crawl.allowlist_exact import enqueue_exact_allowlist_urls
 from lifepilot.crawl.frontier import (
     claim_pending,
+    count_pending_due,
     enqueue_seed,
     enqueue_url,
+    get_frontier_row,
     mark_blocked,
     mark_fetched,
     mark_permanent_failure,
     mark_skipped,
     mark_transient_failure,
 )
-from lifepilot.crawl.links import discover_links_from_html
+from lifepilot.crawl.links import ExtractedLink, discover_links_from_html
+from lifepilot.crawl.pageschema_links import discover_links_from_pageschema
 from lifepilot.crawl.policy import CrawlPolicy
 from lifepilot.crawl.sitemap import discover_sitemaps_for_source
 from lifepilot.crawl.storage import data_root, safe_read_bytes
@@ -41,6 +46,7 @@ from lifepilot.db.models import DiscoveryFrontier, Document, Source
 class FrontierCrawlReport:
     source_id: int
     seed_enqueued: bool = False
+    exact_allowlist_enqueued: int = 0
     sitemap_fetches_attempted: int = 0
     sitemap_fetches_ok: int = 0
     sitemap_urls_enqueued_pending: int = 0
@@ -54,11 +60,60 @@ class FrontierCrawlReport:
     blocked: int = 0
     skipped: int = 0
     children_enqueued: int = 0
+    pageschema_children_enqueued: int = 0
+    out_of_scope_rejected: int = 0
     depth_capped_expansions: int = 0
     enqueue_cap_hits: int = 0
+    sitemap_skipped: bool = False
     fetch_results: list[SeedFetchResult] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     stopped_reason: str | None = None
+
+
+def _enqueue_discovered_children(
+    session: Session,
+    source: Source,
+    *,
+    links: list[ExtractedLink],
+    discovery_method: str,
+    child_depth: int,
+    parent_url: str,
+    enqueue_budget: list[int],
+    report: FrontierCrawlReport,
+) -> None:
+    for link in links:
+        if enqueue_budget[0] <= 0:
+            report.enqueue_cap_hits += 1
+            break
+        if not link.url_normalized:
+            continue
+        if link.kind == "out_of_scope":
+            # Count only — do not persist OOS links (frontier bloat).
+            report.out_of_scope_rejected += 1
+            continue
+        if link.kind not in {
+            "in_scope_html",
+            "in_scope_pdf",
+            "in_scope_docx",
+        }:
+            continue
+        hint = {
+            "in_scope_html": "html_page",
+            "in_scope_pdf": "pdf",
+            "in_scope_docx": "docx",
+        }[link.kind]
+        result = enqueue_url(
+            session,
+            source,
+            url=link.url_normalized,
+            discovery_method=discovery_method,
+            depth=child_depth,
+            parent_url=parent_url,
+            content_kind_hint=hint,
+        )
+        if result.outcome == "inserted_pending":
+            report.children_enqueued += 1
+            enqueue_budget[0] = max(0, enqueue_budget[0] - 1)
 
 
 def classify_fetch_failure(
@@ -136,52 +191,42 @@ def _expand_html_children(
         report.notes.append(f"expand read failed doc={document.id}: {exc}")
         return
     html = raw.decode("utf-8", errors="replace")
-    links = discover_links_from_html(
+    patterns = list(source.allowed_url_patterns or [])
+    anchor_links = discover_links_from_html(
         html,
         base_url=document.canonical_url,
-        allowed_patterns=list(source.allowed_url_patterns or []),
+        allowed_patterns=patterns,
+    )
+    pageschema_links = discover_links_from_pageschema(
+        html,
+        base_url=document.canonical_url,
+        allowed_patterns=patterns,
     )
     child_depth = parent_depth + 1
-    for link in links:
-        if enqueue_budget[0] <= 0:
-            report.enqueue_cap_hits += 1
-            break
-        if not link.url_normalized:
-            continue
-        if link.kind == "out_of_scope":
-            outcome = enqueue_url(
-                session,
-                source,
-                url=link.url_normalized,
-                discovery_method="html_link",
-                depth=child_depth,
-                parent_url=parent_url,
-            )
-            # out_of_scope insert does not consume enqueue budget
-            continue
-        if link.kind not in {
-            "in_scope_html",
-            "in_scope_pdf",
-            "in_scope_docx",
-        }:
-            continue
-        hint = {
-            "in_scope_html": "html_page",
-            "in_scope_pdf": "pdf",
-            "in_scope_docx": "docx",
-        }[link.kind]
-        result = enqueue_url(
-            session,
-            source,
-            url=link.url_normalized,
-            discovery_method="html_link",
-            depth=child_depth,
-            parent_url=parent_url,
-            content_kind_hint=hint,
-        )
-        if result.outcome == "inserted_pending":
-            report.children_enqueued += 1
-            enqueue_budget[0] = max(0, enqueue_budget[0] - 1)
+    _enqueue_discovered_children(
+        session,
+        source,
+        links=anchor_links,
+        discovery_method="html_link",
+        child_depth=child_depth,
+        parent_url=parent_url,
+        enqueue_budget=enqueue_budget,
+        report=report,
+    )
+    before_pageschema = report.children_enqueued
+    _enqueue_discovered_children(
+        session,
+        source,
+        links=pageschema_links,
+        discovery_method="pageschema_link",
+        child_depth=child_depth,
+        parent_url=parent_url,
+        enqueue_budget=enqueue_budget,
+        report=report,
+    )
+    report.pageschema_children_enqueued += max(
+        0, report.children_enqueued - before_pageschema
+    )
 
 
 def crawl_source_frontier(
@@ -209,26 +254,39 @@ def crawl_source_frontier(
     }
     if seed_result.outcome == "inserted_pending":
         enqueue_budget[0] = max(0, enqueue_budget[0] - 1)
+
+    # Exact allowlisted document URLs (literal patterns only — never wildcards).
+    for exact_result in enqueue_exact_allowlist_urls(
+        session, source, enqueue_budget=enqueue_budget
+    ):
+        if exact_result.outcome == "inserted_pending":
+            report.exact_allowlist_enqueued += 1
     session.flush()
 
-    if enable_sitemaps and network_budget[0] > 0:
-        sm = discover_sitemaps_for_source(
-            session,
-            source,
-            policy=policy,
-            http_client=http_client,
-            network_budget=network_budget,
-            enqueue_budget=enqueue_budget,
+    # Do not burn network budget re-hitting Radware/WAF-blocked seeds when
+    # nothing eligible remains in the frontier for this source.
+    seed_row = get_frontier_row(
+        session, source.id, source.seed_url_normalized or source.seed_url
+    )
+    pending_due = count_pending_due(
+        session, source.id, max_depth=policy.max_depth
+    )
+    if (
+        seed_row is not None
+        and seed_row.status == "blocked"
+        and pending_due == 0
+    ):
+        report.notes.append(
+            "skipped: seed blocked and no pending frontier URLs "
+            "(no repeated WAF probes)"
         )
-        report.sitemap_fetches_attempted = sm.sitemap_fetches_attempted
-        report.sitemap_fetches_ok = sm.sitemap_fetches_ok
-        report.sitemap_urls_enqueued_pending = sm.urls_enqueued_pending
-        report.notes.extend(sm.notes[:10])
-        session.flush()
+        report.stopped_reason = "blocked_source"
+        return report
 
     html_used = 0
     binary_used = 0
 
+    # Prefer existing pending frontier before optional sitemap rediscovery.
     while True:
         if network_budget[0] <= 0:
             report.stopped_reason = "network_budget"
@@ -298,6 +356,130 @@ def crawl_source_frontier(
             # Pending rows exist but caps block them (e.g. only binaries left).
             report.stopped_reason = report.stopped_reason or "document_caps"
             break
+
+    # Optional sitemap only when no pending work remains and sitemaps were not
+    # already explored for this source (avoids repeat empty sitemap fetches).
+    pending_after = count_pending_due(
+        session, source.id, max_depth=policy.max_depth
+    )
+    prior_sitemap = session.scalar(
+        select(func.count())
+        .select_from(DiscoveryFrontier)
+        .where(
+            DiscoveryFrontier.source_id == source.id,
+            DiscoveryFrontier.discovery_method == "sitemap",
+        )
+    )
+    if (
+        enable_sitemaps
+        and network_budget[0] > 0
+        and pending_after == 0
+        and int(prior_sitemap or 0) == 0
+        and report.stopped_reason
+        in {None, "frontier_exhausted", "document_caps"}
+        and (seed_row is None or seed_row.status != "blocked")
+    ):
+        sm = discover_sitemaps_for_source(
+            session,
+            source,
+            policy=policy,
+            http_client=http_client,
+            network_budget=network_budget,
+            enqueue_budget=enqueue_budget,
+        )
+        report.sitemap_fetches_attempted = sm.sitemap_fetches_attempted
+        report.sitemap_fetches_ok = sm.sitemap_fetches_ok
+        report.sitemap_urls_enqueued_pending = sm.urls_enqueued_pending
+        report.notes.extend(sm.notes[:10])
+        session.flush()
+        # If sitemap enqueued new pending URLs and caps remain, continue BFS.
+        if (
+            sm.urls_enqueued_pending > 0
+            and network_budget[0] > 0
+            and (html_used < max_html or binary_used < max_binary)
+        ):
+            report.stopped_reason = None
+            while True:
+                if network_budget[0] <= 0:
+                    report.stopped_reason = "network_budget"
+                    break
+                remaining_doc_slots = (max_html - html_used) + (
+                    max_binary - binary_used
+                )
+                if remaining_doc_slots <= 0:
+                    report.stopped_reason = "document_caps"
+                    break
+                batch = claim_pending(
+                    session,
+                    source.id,
+                    limit=min(5, network_budget[0], remaining_doc_slots),
+                    max_depth=policy.max_depth,
+                )
+                if not batch:
+                    report.stopped_reason = (
+                        report.stopped_reason or "frontier_exhausted"
+                    )
+                    break
+                progress = False
+                for row in batch:
+                    if network_budget[0] <= 0:
+                        report.stopped_reason = "network_budget"
+                        break
+                    kind = (row.content_kind_hint or "html_page").lower()
+                    if kind in {"pdf", "docx"}:
+                        if binary_used >= max_binary:
+                            continue
+                    else:
+                        if html_used >= max_html:
+                            continue
+                    progress = True
+                    result = _fetch_frontier_row(
+                        session,
+                        source,
+                        row,
+                        policy=policy,
+                        http_client=http_client,
+                        storage_root=root,
+                        host_times=host_times,
+                    )
+                    result = commit_fetch_result(
+                        session, result, storage_root=root
+                    )
+                    report.fetch_results.append(result)
+                    report.document_fetches_attempted += 1
+                    network_budget[0] = max(0, network_budget[0] - 1)
+                    if kind in {"pdf", "docx"}:
+                        binary_used += 1
+                        report.binary_fetches += 1
+                    else:
+                        html_used += 1
+                        report.html_fetches += 1
+                    _apply_fetch_to_frontier(
+                        session,
+                        source,
+                        row,
+                        result,
+                        policy=policy,
+                        enqueue_budget=enqueue_budget,
+                        report=report,
+                        storage_root=root,
+                    )
+                    session.flush()
+                if not progress:
+                    report.stopped_reason = (
+                        report.stopped_reason or "document_caps"
+                    )
+                    break
+    elif enable_sitemaps and pending_after > 0:
+        report.sitemap_skipped = True
+        report.notes.append(
+            "sitemap skipped: pending frontier URLs preferred"
+        )
+    elif enable_sitemaps and int(prior_sitemap or 0) > 0:
+        report.sitemap_skipped = True
+        report.notes.append(
+            "sitemap skipped: prior sitemap discovery already recorded"
+        )
 
     return report
 

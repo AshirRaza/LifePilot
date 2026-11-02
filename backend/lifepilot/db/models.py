@@ -54,7 +54,13 @@ DOCUMENT_DISCOVERY_STATUSES = ("seed", "discovered", "approved", "rejected")
 DOCUMENT_JURISDICTION_RELEVANCE = ("applicable", "related")
 DOCUMENT_EXTRACTION_STATUSES = ("success", "empty", "failed", "skipped")
 DOCUMENT_COMPARISON_STATUSES = ("unchanged", "changed", "unavailable")
-FRONTIER_DISCOVERY_METHODS = ("seed", "html_link", "sitemap")
+FRONTIER_DISCOVERY_METHODS = (
+    "seed",
+    "html_link",
+    "sitemap",
+    "pageschema_link",
+    "allowlist_exact",
+)
 FRONTIER_STATUSES = (
     "pending",
     "fetched",

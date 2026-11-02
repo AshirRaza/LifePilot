@@ -44,6 +44,9 @@ MOM_HTML = (FIXTURES / "mom_employment_pass.html").read_bytes()
 USCIS_HTML = (FIXTURES / "uscis_working_in_us.html").read_bytes()
 AU_HTML = (FIXTURES / "au_skilled_migration.html").read_bytes()
 DETE_HTML = (FIXTURES / "ie_dete_employment_permits.html").read_bytes()
+AU_PAGESCHEMA_HTML = (
+    FIXTURES / "au_sharepoint_pageschema_empty_main.html"
+).read_bytes()
 
 EMPTY_MAIN_HTML = b"""<!DOCTYPE html>
 <html><head><title>Empty page</title></head>
@@ -161,6 +164,147 @@ def test_australia_aspnet_form_preserves_main():
     assert len(doc.blocks) >= 3
     assert any(b.type == "heading" for b in doc.blocks)
     assert any(b.type == "paragraph" for b in doc.blocks)
+
+
+def test_australia_sharepoint_pageschema_empty_main_recovers_guidance():
+    """Home Affairs visa pages leave <main> empty; guidance is in hidden JSON."""
+    doc = extract_html_document(AU_PAGESCHEMA_HTML)
+    assert "Student visa" in (doc.title or "")
+    assert len(doc.blocks) >= 6
+    types = {b.type for b in doc.blocks}
+    assert "heading" in types
+    assert "paragraph" in types
+    assert "list" in types
+    texts = " ".join(
+        (b.text or "") + " " + " ".join(b.items or ()) for b in doc.blocks
+    )
+    assert "Eligibility" in texts
+    assert "Genuine Temporary Entrant" in texts
+    assert "ImmiAccount" in texts
+    blob = json.dumps(doc.to_content_dict()).lower()
+    # siteData menu / alert noise must not become the document body
+    assert "site alert noise" not in blob
+    assert "home affairs menu" not in blob
+    assert "copyright commonwealth" not in blob
+
+
+def test_embedded_json_dedupes_exact_duplicate_blocks():
+    """Mirrored CMS fragments should not repeat identical blocks."""
+    import html as html_mod
+
+    payload = {
+        "title": "Example visa",
+        "sectionA": "<h2>Eligibility</h2><p>You must meet the criteria.</p><ul><li>Passport</li></ul>",
+        "sectionB": "<h2>Eligibility</h2><p>You must meet the criteria.</p><ul><li>Passport</li></ul>",
+        "sectionC": "<h2>Fees</h2><p>Check the pricing estimator.</p>",
+    }
+    escaped = html_mod.escape(json.dumps(payload), quote=True)
+    html = f"""<!DOCTYPE html>
+<html><head><title>Example visa</title></head>
+<body>
+<main id="content"></main>
+<input type="hidden" value="{escaped}" />
+</body></html>
+""".encode()
+    doc = extract_html_document(html)
+    headings = [b.text for b in doc.blocks if b.type == "heading"]
+    assert headings.count("Eligibility") == 1
+    assert headings.count("Fees") == 1
+    assert any(
+        b.type == "paragraph" and "pricing estimator" in (b.text or "").lower()
+        for b in doc.blocks
+    )
+
+
+def test_embedded_json_recovers_thin_hub_description_and_eligibility():
+    """Citizenship/visa hubs with only description+eligibility HTML still extract."""
+    import html as html_mod
+
+    payload = {
+        "title": "Skills in Demand visa",
+        "description": (
+            "<p>This temporary visa lets an employer sponsor a skilled worker.</p>"
+        ),
+        "eligibility": (
+            "<p>You must:</p><ul><li>Have an approved sponsor</li>"
+            "<li>Be nominated for the visa</li></ul>"
+        ),
+        "recommended": {"cards": [{"id": "x-1", "itemName": "x-1"}]},
+    }
+    escaped = html_mod.escape(json.dumps(payload), quote=True)
+    html = f"""<!DOCTYPE html><html><head><title>Skills in Demand visa</title></head>
+<body><main id="content"></main>
+<input type="hidden" value="{escaped}" /></body></html>""".encode()
+    doc = extract_html_document(html)
+    assert "Skills in Demand" in (doc.title or "")
+    assert len(doc.blocks) >= 2
+    blob = " ".join(
+        (b.text or "") + " " + " ".join(b.items or ()) for b in doc.blocks
+    ).lower()
+    assert "approved sponsor" in blob
+    assert "temporary visa" in blob
+
+
+def test_embedded_json_recovers_tile_catalog_on_thin_main():
+    """Working-hub tile JSON becomes pathway list when main is sparse."""
+    import html as html_mod
+
+    payload = {
+        "tiles": {
+            "tiles": [
+                {
+                    "title": "Regional migration",
+                    "description": "Work in regional Australia",
+                    "link": "/visas/working-in-australia/regional-migration",
+                },
+                {
+                    "title": "Temporary work visas",
+                    "description": "See temporary work options",
+                    "link": "/visas/working-in-australia/temporary-work-visas",
+                },
+                {
+                    "title": "Permanent work visas",
+                    "description": "See permanent work options",
+                    "link": "/visas/working-in-australia/permanent-work-visas",
+                },
+            ]
+        }
+    }
+    escaped = html_mod.escape(json.dumps(payload), quote=True)
+    html = f"""<!DOCTYPE html><html><head><title>Working in Australia</title></head>
+<body><main id="content"><h1>Working in Australia</h1>
+<p>Choose a visa that suits the work you intend to do.</p></main>
+<input type="hidden" value="{escaped}" /></body></html>""".encode()
+    doc = extract_html_document(html)
+    assert len(doc.blocks) >= 4
+    blob = " ".join(
+        (b.text or "") + " " + " ".join(b.items or ()) for b in doc.blocks
+    )
+    assert "Regional migration" in blob
+    assert "Temporary work visas" in blob
+    assert "Permanent work visas" in blob
+
+
+def test_embedded_json_fallback_does_not_degrade_existing_fixtures():
+    """Regression: pages with real <main> content keep the DOM path."""
+    for label, raw, min_blocks in (
+        ("mom", MOM_HTML, 10),
+        ("uscis", USCIS_HTML, 5),
+        ("au_skilled", AU_HTML, 3),
+        ("dete", DETE_HTML, 5),
+    ):
+        doc = extract_html_document(raw)
+        assert len(doc.blocks) >= min_blocks, label
+        assert any(b.type == "heading" for b in doc.blocks), label
+        assert any(b.type == "paragraph" for b in doc.blocks), label
+    uk_html = b"""<!DOCTYPE html><html><head><title>Skilled Worker visa - GOV.UK</title></head>
+<body><main id="content"><h1>Skilled Worker visa</h1>
+<p>Work in the UK for an approved employer.</p>
+<h2>Eligibility</h2><ul><li>Job offer</li><li>Skill level</li></ul>
+</main></body></html>"""
+    uk = extract_html_document(uk_html)
+    assert "Skilled Worker visa" in uk.title
+    assert len(uk.blocks) >= 3
 
 
 def test_ireland_dete_aspnet_form_preserves_article():
