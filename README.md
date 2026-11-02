@@ -18,8 +18,13 @@ Phases completed so far:
 10. **Structured PDF/DOCX extraction** — extract searchable text from stored binaries (PDF page provenance; DOCX style hierarchy); no OCR
 11. **Meaningful content comparison** — compare successful extractions across versions (`unchanged` / `changed` / `unavailable`); ignore raw-only diffs; persist structured diffs
 12. **Unified ingestion pipeline** — dry-run/execute orchestration of approved-source fetch → discovery → extract → compare with global safety caps and resumable reruns
+13. **Resumable frontier crawl** — PostgreSQL discovery frontier, sitemap enqueue, exact allowlist URLs, PageSchema links, content-language detection, bounded multi-source collection
+14. **Coverage audit & pathway normalization** (`coverage/normalization`) — inventoried immigration pathways, calibrated denominators, hub vs true-pathway distinction
+15. **Evidence validation & remediation** (`coverage/evidence_validation`, `evidence_remediation`, `source_gap_closure`) — critical-field assessments, exact official URL proposals, provisional readiness (never auto human-verified)
+16. **Pathway inventory** (`coverage/pathway_inventory`) — 13 countries + EU inventory matrix, Express Entry program split, bounded approved-source expansion
+17. **Source expansion & storage integrity** (`coverage/source_expansion`) — conditional exact-URL approvals, AE/JP/FR gap handling, Canada FSW/CEC/FST deep validation, raw-byte SHA256 audit
 
-Not yet implemented: open crawl, OCR, chunking/embeddings/RAG, API, frontend, or scheduling.
+Not yet implemented: open crawl, OCR, chunking/embeddings/RAG, agents/MCP, API, frontend, or scheduling. Coverage readiness remains automated/provisional until human review.
 
 ## Prerequisites
 
@@ -257,7 +262,43 @@ Resumability: identical raw content does not create duplicate versions; compatib
 
 Does not widen allowlists, bypass bot protection, approve sources, or crawl unbounded.
 
-### 15. Run tests
+### 15. Coverage pipeline (official immigration knowledge base)
+
+These commands deepen **inventory → source → ingestion → evidence** coverage. They reuse the existing registry, crawler, and immutable document store. They do **not** build RAG, APIs, or frontend.
+
+Packages live under `backend/lifepilot/coverage/`:
+
+| Package | Role |
+|---|---|
+| `normalization` | Pathway hub vs true-pathway normalization; calibrated coverage denominators |
+| `evidence_validation` | Critical-field rules; heading-only COMPLETE forbidden |
+| `evidence_remediation` | Corpus-backed field repairs and source proposals |
+| `source_gap_closure` | Exact approved-URL gap closure (e.g. ICA checklist) |
+| `pathway_inventory` | Country × category inventory for GB/DE/NL/SG/US/AU/CA/NZ/IE/CH/AE/JP/FR + EU |
+| `source_expansion` | Owner-authorized exact URL validation/approval, bounded ingest, Canada program evidence, storage integrity |
+
+Run (dry artifacts under `data/runs/`, gitignored; DB writes only when a phase script executes ingestion/approvals):
+
+```powershell
+$env:PYTHONPATH = "backend"
+python scripts/run_coverage_audit.py
+python scripts/run_pathway_normalization.py
+python scripts/run_evidence_validation.py
+python scripts/run_evidence_remediation.py
+python scripts/run_source_gap_closure.py
+python scripts/run_pathway_inventory.py
+python scripts/run_source_expansion.py
+```
+
+Allowlist changes still require explicit review (`scripts/set_source_patterns.py --confirm-expand`). New authorities/domains are never auto-approved. Historical `data/runs/phase_6*` report filenames are retained for audit traceability.
+
+Coverage tests:
+
+```powershell
+pytest tests/test_pathway_normalization.py tests/test_evidence_validation.py tests/test_evidence_remediation.py tests/test_source_gap_closure.py tests/test_pathway_inventory.py tests/test_source_expansion.py -q
+```
+
+### 16. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -296,7 +337,15 @@ pytest -v
 | `python scripts/run_ingestion.py --all-approved --execute` | Multi-source full ingest under global budgets |
 | `python scripts/run_ingestion.py --country SG` | Dry-run approved sources for one jurisdiction/country |
 | `python scripts/import_registry_config.py --config config/registry/global_candidates_6c2.json` | Import candidate countries/sources + approval manifest |
-| `pytest -v` | Run schema + registry + crawl + extract tests |
+| `python scripts/set_source_patterns.py --source-id N --pattern URL --confirm-expand` | Explicit allowlist widen after review |
+| `python scripts/run_coverage_audit.py` | Country coverage audit inventory/matrix |
+| `python scripts/run_pathway_normalization.py` | Normalize hubs vs true pathways; calibrate denominators |
+| `python scripts/run_evidence_validation.py` | Critical-field evidence validation / provisional readiness |
+| `python scripts/run_evidence_remediation.py` | Evidence repairs against ingested corpus |
+| `python scripts/run_source_gap_closure.py` | Exact official URL gap closure under approved scopes |
+| `python scripts/run_pathway_inventory.py` | Systematic pathway inventory + bounded coverage expansion |
+| `python scripts/run_source_expansion.py` | Conditional exact-URL approvals, ingest, storage integrity |
+| `pytest -v` | Run schema + registry + crawl + extract + coverage tests |
 
 ### Inspect tables in Postgres
 
@@ -315,24 +364,39 @@ SELECT id, name, seed_url, review_status FROM sources ORDER BY id;
 
 ```text
 LifePilot/
-├── compose.yaml                 # Postgres + pgvector
+├── compose.yaml                 # Postgres + pgvector (named volume postgres_data)
 ├── .env.example                 # Env template (safe to commit)
 ├── .env                         # Local secrets (gitignored)
 ├── check_db.py                  # DB connectivity smoke test
 ├── requirements.txt
 ├── alembic.ini
 ├── alembic/                     # Migrations
+├── config/
+│   ├── coverage/                # Pathway seeds, signals, normalization config
+│   └── registry/                # Candidate source manifests (import as candidate)
 ├── backend/lifepilot/
 │   ├── db/                      # SQLAlchemy models + session
 │   ├── registry/                # Seed registry (import, verify, review, URL scope)
-│   ├── crawl/                   # Planner, seed fetch, bounded link/binary discovery
+│   ├── crawl/                   # Planner, frontier, seed/link/binary discovery
 │   ├── extract/                 # Structured HTML/PDF/DOCX extraction + comparison
-│   └── ingest/                  # Unified bounded ingestion orchestration
+│   ├── ingest/                  # Unified bounded ingestion orchestration
+│   └── coverage/                # Immigration pathway coverage & evidence pipeline
+│       ├── normalization/
+│       ├── evidence_validation/
+│       ├── evidence_remediation/
+│       ├── source_gap_closure/
+│       ├── pathway_inventory/
+│       └── source_expansion/
 ├── data/                        # Raw + extracted + compared + run reports (gitignored)
-├── tests/                       # Schema + registry + crawl + extract + ingest tests
+│   ├── raw/documents/           # Immutable HTML/PDF/DOCX bytes (host filesystem)
+│   ├── extracted/
+│   ├── compared/
+│   └── runs/                    # Coverage baselines/reports (phase_6* filenames kept)
+├── tests/                       # Schema + registry + crawl + extract + coverage tests
 ├── scripts/
 │   ├── run_migrate.py
 │   ├── import_seed_sources.py
+│   ├── import_registry_config.py
 │   ├── plan_crawl.py
 │   ├── fetch_seeds.py
 │   ├── discover_links.py
@@ -342,7 +406,14 @@ LifePilot/
 │   ├── extract_html.py
 │   ├── extract_documents.py
 │   ├── compare_documents.py
-│   └── run_ingestion.py
+│   ├── run_ingestion.py
+│   ├── run_coverage_audit.py
+│   ├── run_pathway_normalization.py
+│   ├── run_evidence_validation.py
+│   ├── run_evidence_remediation.py
+│   ├── run_source_gap_closure.py
+│   ├── run_pathway_inventory.py
+│   └── run_source_expansion.py
 ├── pytest.ini
 ├── .gitignore
 └── README.md
@@ -384,6 +455,20 @@ LifePilot/
 | AI | LangGraph/LangChain, OpenAI and/or Anthropic |
 | Infra | Docker, GitHub Actions |
 
+## Storage persistence note
+
+- **Raw document bytes** live on the host under `data/raw/` (gitignored).
+- **Postgres** uses the Docker named volume `postgres_data` in `compose.yaml`.
+- Backups must include **both** the database volume and the `data/` tree. SHA256 on `document_versions` can be recomputed from stored files for integrity checks.
+
 ## Next steps
 
-Phase 6C multi-source backlog processing (`process-existing`, `--all-approved`), then chunking/embeddings/RAG and API/frontend—built incrementally. Do not wipe historical raw/extraction/comparison versions unless explicitly intended.
+Priority remaining coverage work (before RAG/API/frontend):
+
+1. Approve/research current official pages for JP (ISA status) and FR (passeport talent)—prior candidates were 404 or hub-only
+2. Pathway-specific AE pages beyond the federal visa hub
+3. Canada Express Entry invitation document checklist (FSW/CEC/FST docs still PARTIAL)
+4. Human verification of provisionally ready pathways
+5. Only then: chunking/embeddings/RAG and API/frontend—built incrementally
+
+Do not wipe historical raw/extraction/comparison versions unless explicitly intended. Do not treat a government URL alone as proof of a complete immigration requirement.
