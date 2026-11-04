@@ -280,19 +280,19 @@ def test_repair_proposals_generated():
             "url": "https://example.com",
         },
         {
-            "issue_type": "orphaned_document",
+            "issue_type": "unused_unlinked_document",
             "pathway_id": "",
             "requirement": "",
-            "severity": "low",
-            "description": "Document not referenced",
-            "auto_repairable": False,  # Not auto-repairable
-            "repair_action": "Manual review",
+            "severity": "info",
+            "description": "Document extracted but not linked",
+            "auto_repairable": False,
+            "repair_action": "Optional review",
             "document_id": "999",
             "version_id": "",
             "url": "",
         },
     ]
-    
+
     repairs = generate_repair_proposals(issues)
     assert len(repairs) == 1  # Only hub_as_pathway is auto-repairable
     assert repairs[0]["issue_type"] == "hub_as_pathway"
@@ -303,19 +303,41 @@ def test_repair_proposals_generated():
 
 
 def test_assessment_complete_requires_passage_and_doc():
-    """COMPLETE assessments must have passage and document_id."""
-    # Machine assessment should never return COMPLETE
-    blocks = [{"type": "paragraph", "text": "You must be eligible to apply..."}]
-    
-    assessment = assess_document_for_pathway(
-        blocks, "gb_student", "eligibility", 100, 200, "https://example.com"
+    """Machine assessments are at most PARTIAL and require pathway-applicable URLs."""
+    blocks = [
+        {"type": "heading", "text": "Eligibility"},
+        {
+            "type": "paragraph",
+            "text": (
+                "To be eligible for a Student visa you must have a Confirmation of Acceptance "
+                "for Studies (CAS) and meet the financial requirements listed on this page. "
+            )
+            * 3,
+        },
+    ]
+    # Non-applicable URL → no upgrade even with keywords
+    assert (
+        assess_document_for_pathway(
+            blocks, "gb_student", "eligibility", 100, 200, "https://example.com"
+        )
+        is None
     )
-    
-    if assessment:
-        # Machine assessments are at most PARTIAL, never COMPLETE
-        assert assessment.new_classification != "COMPLETE"
-        assert assessment.new_classification == "PARTIAL"
-        assert assessment.method == "machine_assessed"
+    assessment = assess_document_for_pathway(
+        blocks,
+        "gb_student",
+        "eligibility",
+        100,
+        200,
+        "https://www.gov.uk/student-visa",
+        title="Student visa",
+    )
+    assert assessment is not None
+    assert assessment.new_classification == "PARTIAL"
+    assert assessment.new_classification != "COMPLETE"
+    assert assessment.method in {
+        "pathway_aware_machine",
+        "pathway_requirement_aware_machine",
+    }
 
 
 def test_match_requirement_eligibility():
@@ -352,7 +374,7 @@ def test_priority_pathways_defined():
 
 
 def test_readiness_audit_never_sets_human_verified():
-    """Readiness audit must never set human_verified=True."""
+    """Without an explicit confirm decision, human_verified stays False."""
     evidence_rows = [
         {
             "pathway_id": "gb_skilled_worker",
@@ -360,18 +382,18 @@ def test_readiness_audit_never_sets_human_verified():
             "classification": "COMPLETE",
             "document_id": "100",
             "version_id": "200",
-            "source_url": "https://www.gov.uk/skilled-worker",
+            "source_url": "https://www.gov.uk/skilled-worker-visa",
             "entity_type": "true_pathway",
             "passage": "This is the detailed eligibility information..." * 10,
             "country": "GB",
         }
         for req in ["eligibility", "required_documents", "application_process", "financial_or_sponsorship", "official_provenance"]
     ]
-    
+
     provisionally_ready = ["gb_skilled_worker"]
-    
+
     reviews = audit_readiness(evidence_rows, provisionally_ready, ["gb_skilled_worker"])
-    
+
     for review in reviews:
         assert review.human_verified is False, f"human_verified must be False for {review.pathway_id}"
 

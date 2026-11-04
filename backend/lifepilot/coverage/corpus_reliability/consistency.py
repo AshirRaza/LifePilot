@@ -230,7 +230,9 @@ def audit_evidence_consistency(
                     "url": url,
                 })
     
-    # 6. Check for orphaned documents (in DB but not referenced by any evidence)
+    # 6. Documents with extractions but unused in the evidence matrix are
+    # unused/unlinked candidates — not integrity failures. Reserve
+    # orphaned_document for broken references (COMPLETE pointing at missing docs).
     referenced_doc_ids = set()
     for row in evidence_rows:
         if row.get("document_id") not in ("", None):
@@ -238,7 +240,7 @@ def audit_evidence_consistency(
                 referenced_doc_ids.add(int(row["document_id"]))
             except (ValueError, TypeError):
                 pass
-    
+
     for doc_id, doc in docs_by_id.items():
         if doc_id not in referenced_doc_ids:
             versions = versions_by_doc.get(doc_id, [])
@@ -246,16 +248,35 @@ def audit_evidence_consistency(
                 any(e["status"] == "success" for e in extractions_by_version.get(v["id"], []))
                 for v in versions
             )
+            has_any_version = bool(versions)
             if has_extraction:
-                # Document is extracted but not referenced
+                issues.append({
+                    "issue_type": "unused_unlinked_document",
+                    "pathway_id": "",
+                    "requirement": "",
+                    "severity": "info",
+                    "description": (
+                        f"Document {doc_id} ({doc['title'] or (doc['canonical_url'] or '')[:50]}) "
+                        "has a successful extraction but is not linked in the evidence matrix"
+                    ),
+                    "auto_repairable": False,
+                    "repair_action": "Optional: review for pathway-specific linkage; not an integrity error",
+                    "document_id": doc_id,
+                    "version_id": "",
+                    "url": doc["canonical_url"],
+                })
+            elif not has_any_version:
                 issues.append({
                     "issue_type": "orphaned_document",
                     "pathway_id": "",
                     "requirement": "",
-                    "severity": "low",
-                    "description": f"Document {doc_id} ({doc['title'] or doc['canonical_url'][:50]}) has extraction but isn't referenced in evidence matrix",
+                    "severity": "medium",
+                    "description": (
+                        f"Document {doc_id} ({doc['title'] or (doc['canonical_url'] or '')[:50]}) "
+                        "has no versions — broken corpus record"
+                    ),
                     "auto_repairable": False,
-                    "repair_action": "Review document and link to appropriate pathway/requirement if relevant",
+                    "repair_action": "Investigate missing versions / storage",
                     "document_id": doc_id,
                     "version_id": "",
                     "url": doc["canonical_url"],

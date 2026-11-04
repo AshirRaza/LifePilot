@@ -1,11 +1,11 @@
 """Readiness audit for provisionally ready pathways.
 
-Independently audits pathways marked as provisionally ready to verify
-they genuinely meet readiness criteria. Especially checks that IE
-readiness isn't checklist-docs-only.
+Single authoritative calculation: provisional readiness requires every
+applicable critical requirement to be COMPLETE or NOT_APPLICABLE with valid
+supporting evidence. COMPLETE is never confused with human_verified.
 
-Decisions: retain / downgrade / requires_manual_review
-Never sets human_verified=true.
+Rejected human-review evidence cannot contribute to provisional readiness.
+Never sets human_verified=true unless an explicit confirm decision exists.
 """
 
 from __future__ import annotations
@@ -16,7 +16,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Pathways to audit (from user spec)
+from lifepilot.coverage.corpus_reliability.human_review import (
+    apply_reviews_to_readiness,
+    load_pathway_confirmations,
+    load_reviews,
+    pathway_confirmations_path,
+    pathway_is_human_verified,
+    reviews_path,
+)
+
 AUDIT_PATHWAYS = [
     "gb_skilled_worker",
     "nl_highly_skilled_migrant",
@@ -34,7 +42,6 @@ CRITICAL_REQUIREMENTS = [
     "official_provenance",
 ]
 
-# IE checklist-only evidence patterns
 IE_CHECKLIST_PATTERNS = [
     "checklist",
     "documents required",
@@ -44,83 +51,118 @@ IE_CHECKLIST_PATTERNS = [
 
 @dataclass
 class ReadinessReview:
-    """A single pathway readiness review."""
     pathway_id: str
     country: str
     was_provisionally_ready: bool
-    decision: str  # retain / downgrade / requires_manual_review
+    is_provisionally_ready: bool
+    decision: str  # retain / downgrade / requires_manual_review / not_applicable
     rationale: str
     evidence_summary: dict[str, str] = field(default_factory=dict)
     concerns: list[str] = field(default_factory=list)
     reviewed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    human_verified: bool = False  # Always False
+    human_verified: bool = False
+
+
+@dataclass
+class ReadinessSummary:
+    """Authoritative counts shared by CSV, CLI, and report."""
+
+    total_audited: int
+    retain: int
+    downgrade: int
+    requires_manual_review: int
+    not_applicable: int
+    provisionally_ready_pathways: list[str]
+    human_verified_pathways: list[str]
+    reviews: list[ReadinessReview]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_audited": self.total_audited,
+            "retain": self.retain,
+            "downgrade": self.downgrade,
+            "requires_manual_review": self.requires_manual_review,
+            "not_applicable": self.not_applicable,
+            "provisionally_ready_pathways": self.provisionally_ready_pathways,
+            "human_verified_pathways": self.human_verified_pathways,
+            "human_verified_count": len(self.human_verified_pathways),
+            "note": "COMPLETE != human_verified; human_verified requires explicit confirm decision",
+        }
+
+
+def _cls(row: dict[str, Any]) -> str:
+    return row.get("classification") or row.get("classification_6h") or "UNEVALUATED"
 
 
 def check_evidence_quality(
     evidence_rows: list[dict[str, Any]],
     pathway_id: str,
 ) -> dict[str, Any]:
-    """Check quality of evidence for a pathway.
-    
-    Returns summary of evidence quality per requirement.
-    """
     pathway_rows = [
         r for r in evidence_rows
-        if r["pathway_id"] == pathway_id and r["entity_type"] == "true_pathway"
+        if r["pathway_id"] == pathway_id and r.get("entity_type") == "true_pathway"
     ]
-    
-    summary = {}
-    concerns = []
-    
+
+    summary: dict[str, str] = {}
+    concerns: list[str] = []
+
     for req in CRITICAL_REQUIREMENTS:
         req_rows = [r for r in pathway_rows if r["requirement"] == req]
         if not req_rows:
             summary[req] = "MISSING_ROW"
             concerns.append(f"{req}: No evidence row found")
             continue
-        
+
         row = req_rows[0]
-        # Support both "classification" and "classification_6h" column names
-        cls = row.get("classification") or row.get("classification_6h", "UNEVALUATED")
+        cls = _cls(row)
         summary[req] = cls
-        
+
+        if row.get("human_review_decision") == "reject" or row.get("readiness_excluded_reason") == "human_rejected":
+            concerns.append(f"{req}: human-rejected evidence cannot support readiness")
+            continue
+
+        if cls == "NOT_APPLICABLE":
+            rationale = (row.get("not_applicable_rationale") or row.get("explanation") or row.get("rationale") or "").strip()
+            if not rationale:
+                concerns.append(f"{req}: NOT_APPLICABLE without explicit justification")
+            continue
+
         if cls == "COMPLETE":
-            # Verify COMPLETE has substantive evidence
-            passage = row.get("passage", "")
+            passage = row.get("passage", "") or ""
             doc_id = row.get("document_id")
-            
-            if not doc_id:
-                concerns.append(f"{req}: COMPLETE without document_id")
-            
-            if not passage or len(passage) < 50:
-                concerns.append(f"{req}: COMPLETE with insufficient passage ({len(passage or '')} chars)")
-            
-            # Check for checklist-only evidence
-            if req in ("eligibility", "application_process"):
-                passage_lower = (passage or "").lower()
-                if any(p in passage_lower for p in IE_CHECKLIST_PATTERNS):
-                    if not any(
-                        kw in passage_lower
-                        for kw in ("criteria", "requirement", "eligible", "how to apply", "process")
-                    ):
-                        concerns.append(
-                            f"{req}: Evidence may be checklist-docs-only "
-                            f"(found checklist keywords but no substantive content)"
-                        )
-        
-        elif cls in ("MISSING", "UNEVALUATED", "PARTIAL"):
-            # Provisional readiness requires all applicable critical fields COMPLETE
-            # (or NOT_APPLICABLE). PARTIAL blocks retain.
-            if cls != "NOT_APPLICABLE":
-                concerns.append(f"{req}: Classification is {cls}")
-    
-    applicable_ok = all(
-        s in {"COMPLETE", "NOT_APPLICABLE"} for s in summary.values()
-    )
+            if req == "official_provenance":
+                # Provenance may be source-linked without a passage; still need a source or doc.
+                if not doc_id and not row.get("evidence_source_ids") and not row.get("source_url"):
+                    concerns.append(f"{req}: COMPLETE without document/source reference")
+                elif not passage or len(passage) < 50:
+                    concerns.append(
+                        f"{req}: COMPLETE with insufficient passage ({len(passage or '')} chars); "
+                        "requires manual review before treating provenance as settled"
+                    )
+            else:
+                if not doc_id:
+                    concerns.append(f"{req}: COMPLETE without document_id")
+                if not passage or len(passage) < 50:
+                    concerns.append(f"{req}: COMPLETE with insufficient passage ({len(passage or '')} chars)")
+                if req in ("eligibility", "application_process"):
+                    passage_lower = passage.lower()
+                    if any(p in passage_lower for p in IE_CHECKLIST_PATTERNS):
+                        if not any(
+                            kw in passage_lower
+                            for kw in ("criteria", "requirement", "eligible", "how to apply", "process")
+                        ):
+                            concerns.append(
+                                f"{req}: Evidence may be checklist-docs-only "
+                                "(checklist keywords without substantive content)"
+                            )
+        elif cls in ("MISSING", "UNEVALUATED", "PARTIAL", "BLOCKED"):
+            concerns.append(f"{req}: Classification is {cls}")
+
+    applicable_ok = all(s in {"COMPLETE", "NOT_APPLICABLE"} for s in summary.values())
     return {
         "summary": summary,
         "concerns": concerns,
-        "all_complete": applicable_ok,
+        "all_complete": applicable_ok and not concerns,
         "has_concerns": len(concerns) > 0,
     }
 
@@ -129,43 +171,36 @@ def audit_ie_pathway(
     evidence_rows: list[dict[str, Any]],
     pathway_id: str,
 ) -> dict[str, Any]:
-    """Special audit for IE pathways - check for checklist-docs-only evidence.
-    
-    IE readiness must not be based solely on document checklists.
+    """IE readiness must not rest solely on checklist PDFs for eligibility/process.
+
+    required_documents may legitimately cite an official checklist PDF; eligibility
+    and application_process must cite permit guidance with substance.
     """
     pathway_rows = [
         r for r in evidence_rows
-        if r["pathway_id"] == pathway_id and r["entity_type"] == "true_pathway"
+        if r["pathway_id"] == pathway_id and r.get("entity_type") == "true_pathway"
     ]
-    
     ie_concerns = []
-    
     for row in pathway_rows:
         req = row.get("requirement")
-        # Support both "classification" and "classification_6h" column names
-        cls = row.get("classification") or row.get("classification_6h", "UNEVALUATED")
+        cls = _cls(row)
         passage = row.get("passage", "") or row.get("reason", "")
         evidence_basis = row.get("evidence_basis", "")
-        
-        if cls == "COMPLETE" and req in ("eligibility", "required_documents", "application_process"):
-            # Check if evidence is substantive or just a checklist reference
+        if cls == "COMPLETE" and req in ("eligibility", "application_process"):
             passage_lower = (passage or "").lower()
-            
             is_checklist_only = (
-                "checklist" in passage_lower or
-                "documents required" in passage_lower or
-                evidence_basis in ("official_checklist_pdf", "phase_6h_pdf_checklist_upgrade")
+                "checklist" in passage_lower
+                or evidence_basis in ("official_checklist_pdf", "phase_6h_pdf_checklist_upgrade")
             )
-            
             has_substance = (
-                "eligible" in passage_lower or
-                "criteria" in passage_lower or
-                "requirement" in passage_lower or
-                "must have" in passage_lower or
-                "need to" in passage_lower or
-                len(passage) > 200
+                "eligible" in passage_lower
+                or "criteria" in passage_lower
+                or "requirement" in passage_lower
+                or "must have" in passage_lower
+                or "need to" in passage_lower
+                or "how to apply" in passage_lower
+                or len(passage or "") > 200
             )
-            
             if is_checklist_only and not has_substance:
                 ie_concerns.append({
                     "requirement": req,
@@ -173,7 +208,6 @@ def audit_ie_pathway(
                     "evidence_basis": evidence_basis,
                     "passage_length": len(passage or ""),
                 })
-    
     return {
         "pathway_id": pathway_id,
         "ie_concerns": ie_concerns,
@@ -181,83 +215,127 @@ def audit_ie_pathway(
     }
 
 
+def pathway_is_provisionally_ready(evidence_rows: list[dict[str, Any]], pathway_id: str) -> bool:
+    quality = check_evidence_quality(evidence_rows, pathway_id)
+    return bool(quality["all_complete"]) and not quality["has_concerns"]
+
+
 def audit_readiness(
     evidence_rows: list[dict[str, Any]],
-    provisionally_ready: list[str],
+    provisionally_ready: list[str] | None = None,
     pathways_to_audit: list[str] | None = None,
+    human_reviews: list[dict[str, Any]] | None = None,
+    pathway_confirmations: list[dict[str, Any]] | None = None,
+    runs_dir: Path | None = None,
 ) -> list[ReadinessReview]:
-    """Audit readiness of provisionally ready pathways.
-    
-    Args:
-        evidence_rows: Current evidence matrix.
-        provisionally_ready: List of pathway IDs marked as provisionally ready.
-        pathways_to_audit: Specific pathways to audit (default: AUDIT_PATHWAYS).
-    
-    Returns:
-        List of ReadinessReview results.
-    """
+    """Audit readiness from one authoritative evidence state."""
+    effective = evidence_rows
+    if human_reviews:
+        effective = apply_reviews_to_readiness(evidence_rows, human_reviews)
+
     audit_list = pathways_to_audit or AUDIT_PATHWAYS
+    # Derive current provisional readiness from evidence when not supplied.
+    derived_ready = [
+        pid for pid in audit_list
+        if pathway_is_provisionally_ready(effective, pid)
+    ]
+    prior_ready = set(provisionally_ready or derived_ready)
+
+    confirmations = pathway_confirmations
+    if confirmations is None and runs_dir is not None:
+        confirmations = load_pathway_confirmations(pathway_confirmations_path(runs_dir))
+    confirmations = confirmations or []
+
     reviews: list[ReadinessReview] = []
-    
+
     for pid in audit_list:
-        was_ready = pid in provisionally_ready
-        
-        # Get country from evidence rows
-        pathway_rows = [r for r in evidence_rows if r["pathway_id"] == pid]
+        pathway_rows = [r for r in effective if r["pathway_id"] == pid]
         country = pathway_rows[0].get("country", "") if pathway_rows else ""
-        
-        # Check evidence quality
-        quality = check_evidence_quality(evidence_rows, pid)
-        
-        # Special IE audit
-        ie_audit = None
-        if pid.startswith("ie_"):
-            ie_audit = audit_ie_pathway(evidence_rows, pid)
-        
-        # Determine decision
-        if not was_ready:
+        quality = check_evidence_quality(effective, pid)
+        is_ready = pathway_is_provisionally_ready(effective, pid)
+        was_ready = pid in prior_ready
+
+        ie_audit = audit_ie_pathway(effective, pid) if pid.startswith("ie_") else None
+
+        # Pathway human_verified requires: every applicable critical requirement
+        # explicitly confirmed AND a separate confirm-pathway decision.
+        # Packet generation / automated assessment never sets this flag.
+        human_verified = False
+        if human_reviews or confirmations:
+            human_verified = pathway_is_human_verified(
+                pid,
+                evidence_rows=effective,
+                reviews=human_reviews or [],
+                confirmations=confirmations,
+                critical_requirements=CRITICAL_REQUIREMENTS,
+            )
+
+        if not was_ready and not is_ready:
             decision = "not_applicable"
-            rationale = "Pathway was not provisionally ready"
-        elif quality["has_concerns"]:
+            rationale = "Pathway is not provisionally ready under current evidence"
+        elif quality["has_concerns"] or not is_ready:
             if ie_audit and ie_audit["is_checklist_docs_only"]:
                 decision = "downgrade"
                 rationale = (
-                    f"IE pathway evidence is checklist-docs-only: "
+                    "IE pathway eligibility/process evidence is checklist-docs-only: "
                     f"{[c['requirement'] for c in ie_audit['ie_concerns']]}. "
-                    f"Requires substantive eligibility/process evidence."
+                    "Permit guidance with substance is required."
                 )
             elif any("COMPLETE without document_id" in c for c in quality["concerns"]):
                 decision = "downgrade"
                 rationale = "COMPLETE cells lack document_id references"
+            elif any("human-rejected" in c for c in quality["concerns"]):
+                decision = "downgrade"
+                rationale = "One or more critical cells were rejected in human review"
             elif any("insufficient passage" in c for c in quality["concerns"]):
                 decision = "requires_manual_review"
                 rationale = "Evidence passages are too short for automated verification"
+            elif any("NOT_APPLICABLE without explicit justification" in c for c in quality["concerns"]):
+                decision = "requires_manual_review"
+                rationale = "NOT_APPLICABLE cells lack explicit justification"
             else:
                 decision = "requires_manual_review"
                 rationale = f"Concerns found: {'; '.join(quality['concerns'][:3])}"
         else:
             decision = "retain"
-            rationale = "All critical requirements COMPLETE with substantive evidence"
-        
+            rationale = "All critical requirements COMPLETE/N/A with valid supporting evidence"
+
         reviews.append(ReadinessReview(
             pathway_id=pid,
             country=country,
             was_provisionally_ready=was_ready,
+            is_provisionally_ready=is_ready and decision == "retain",
             decision=decision,
             rationale=rationale,
             evidence_summary=quality["summary"],
             concerns=quality["concerns"],
-            human_verified=False,  # Never True
+            human_verified=human_verified,
         ))
-    
+
     return reviews
 
 
+def summarize_readiness(reviews: list[ReadinessReview]) -> ReadinessSummary:
+    counts = {"retain": 0, "downgrade": 0, "requires_manual_review": 0, "not_applicable": 0}
+    for r in reviews:
+        counts[r.decision] = counts.get(r.decision, 0) + 1
+    return ReadinessSummary(
+        total_audited=len(reviews),
+        retain=counts.get("retain", 0),
+        downgrade=counts.get("downgrade", 0),
+        requires_manual_review=counts.get("requires_manual_review", 0),
+        not_applicable=counts.get("not_applicable", 0),
+        provisionally_ready_pathways=[r.pathway_id for r in reviews if r.decision == "retain"],
+        human_verified_pathways=[r.pathway_id for r in reviews if r.human_verified],
+        reviews=reviews,
+    )
+
+
 def write_readiness_csv(reviews: list[ReadinessReview], path: Path) -> None:
-    """Write readiness review to CSV."""
     fieldnames = [
-        "pathway_id", "country", "was_provisionally_ready", "decision",
-        "rationale", "concerns", "evidence_summary", "reviewed_at", "human_verified"
+        "pathway_id", "country", "was_provisionally_ready", "is_provisionally_ready",
+        "decision", "rationale", "concerns", "evidence_summary",
+        "reviewed_at", "human_verified",
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -267,6 +345,7 @@ def write_readiness_csv(reviews: list[ReadinessReview], path: Path) -> None:
                 "pathway_id": r.pathway_id,
                 "country": r.country,
                 "was_provisionally_ready": r.was_provisionally_ready,
+                "is_provisionally_ready": r.is_provisionally_ready,
                 "decision": r.decision,
                 "rationale": r.rationale,
                 "concerns": "; ".join(r.concerns),
@@ -280,70 +359,73 @@ def generate_human_review_packet(
     reviews: list[ReadinessReview],
     evidence_rows: list[dict[str, Any]],
 ) -> str:
-    """Generate markdown packet for human review.
-    
-    Includes pathways that need manual review with their evidence.
-    """
+    summary = summarize_readiness(reviews)
     lines = [
-        "# Phase 6I Readiness Human Review Packet",
+        "# Readiness Human Review Packet",
         "",
         f"Generated: {datetime.now(timezone.utc).isoformat()}",
         "",
-        "## Summary",
+        "## Authoritative Summary",
         "",
+        f"- Audited: {summary.total_audited}",
+        f"- Retain (provisionally ready): {summary.retain}",
+        f"- Downgrade: {summary.downgrade}",
+        f"- Requires manual review: {summary.requires_manual_review}",
+        f"- Human-verified pathways: {len(summary.human_verified_pathways)} "
+        f"({', '.join(summary.human_verified_pathways) or 'none'})",
+        "",
+        "COMPLETE is not human_verified. Human verification requires an explicit confirm decision.",
+        "",
+        "| Pathway | Decision | Concerns |",
+        "|---------|----------|----------|",
     ]
-    
-    # Summary table
-    lines.append("| Pathway | Decision | Concerns |")
-    lines.append("|---------|----------|----------|")
     for r in reviews:
         concerns_short = "; ".join(r.concerns[:2]) if r.concerns else "None"
-        lines.append(f"| {r.pathway_id} | {r.decision} | {concerns_short[:50]}{'...' if len(concerns_short) > 50 else ''} |")
-    
-    lines.append("")
-    lines.append("## Pathways Requiring Review")
-    lines.append("")
-    
+        lines.append(
+            f"| {r.pathway_id} | {r.decision} | "
+            f"{concerns_short[:50]}{'...' if len(concerns_short) > 50 else ''} |"
+        )
+
+    lines += ["", "## Pathways Requiring Review", ""]
     for r in reviews:
-        if r.decision in ("requires_manual_review", "downgrade"):
-            lines.append(f"### {r.pathway_id} ({r.country})")
+        if r.decision not in ("requires_manual_review", "downgrade"):
+            continue
+        lines.append(f"### {r.pathway_id} ({r.country})")
+        lines.append("")
+        lines.append(f"**Decision:** {r.decision}")
+        lines.append(f"**Rationale:** {r.rationale}")
+        lines.append("")
+        lines.append("**Evidence Summary:**")
+        for req, cls in r.evidence_summary.items():
+            lines.append(f"- {req}: {cls}")
+        lines.append("")
+        if r.concerns:
+            lines.append("**Concerns:**")
+            for c in r.concerns:
+                lines.append(f"- {c}")
             lines.append("")
-            lines.append(f"**Decision:** {r.decision}")
-            lines.append(f"**Rationale:** {r.rationale}")
+        pathway_rows = [
+            row for row in evidence_rows
+            if row["pathway_id"] == r.pathway_id
+            and row.get("entity_type") == "true_pathway"
+            and _cls(row) == "COMPLETE"
+        ]
+        if pathway_rows:
+            lines.append("**Evidence Passages:**")
             lines.append("")
-            lines.append("**Evidence Summary:**")
-            for req, cls in r.evidence_summary.items():
-                lines.append(f"- {req}: {cls}")
-            lines.append("")
-            
-            if r.concerns:
-                lines.append("**Concerns:**")
-                for c in r.concerns:
-                    lines.append(f"- {c}")
+            for row in pathway_rows:
+                lines.append(f"**{row['requirement']}** (doc {row.get('document_id', 'N/A')}):")
+                passage = (row.get("passage") or "")[:300]
+                lines.append(f"> {passage}{'...' if len(row.get('passage') or '') > 300 else ''}")
                 lines.append("")
-            
-            # Include relevant evidence passages
-            def get_cls(row: dict) -> str:
-                return row.get("classification") or row.get("classification_6h", "UNEVALUATED")
-            
-            pathway_rows = [
-                row for row in evidence_rows
-                if row["pathway_id"] == r.pathway_id
-                and row["entity_type"] == "true_pathway"
-                and get_cls(row) == "COMPLETE"
-            ]
-            if pathway_rows:
-                lines.append("**Evidence Passages:**")
-                lines.append("")
-                for row in pathway_rows:
-                    lines.append(f"**{row['requirement']}** (doc {row.get('document_id', 'N/A')}):")
-                    passage = row.get("passage", "")[:300]
-                    lines.append(f"> {passage}{'...' if len(row.get('passage', '')) > 300 else ''}")
-                    lines.append("")
-    
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-    lines.append("**Note:** This packet is for human review only. Do not set human_verified=true without manual verification.")
-    
+
+    lines += [
+        "---",
+        "",
+        "Use `python scripts/run_corpus_reliability.py review ...` to record confirm/reject/investigate.",
+    ]
     return "\n".join(lines)
+
+
+def load_human_reviews_for_runs(runs_dir: Path) -> list[dict[str, Any]]:
+    return load_reviews(reviews_path(runs_dir))

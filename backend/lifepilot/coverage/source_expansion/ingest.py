@@ -172,6 +172,7 @@ def targeted_exact_fetch(
             "message": result.message,
             "http_status": result.http_status,
             "document_id": result.document_id,
+            "final_url": getattr(result, "final_url", None),
             "fetches_attempted": 1,
             "new_version": result.status == STATUS_FETCHED_NEW_VERSION,
             "children_enqueued": report.children_enqueued,
