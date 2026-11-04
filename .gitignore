@@ -1,9 +1,51 @@
+# Cursor / IDE
 .cursor/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
 .venv/
-.env
+venv/
+env/
 __pycache__/
-*.pyc
-.pytest_cache/
+*.py[cod]
+*$py.class
 *.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Local secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Local data & backups (keep schemas/migrations in git)
 data/
 backups/
+*.sql.gz
+*.dump
+*.db
+
+# Logs and scratch
+*.log
+logs/
+tmp/
+temp/
+.scratch/
+scripts/_tmp_*.py
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini

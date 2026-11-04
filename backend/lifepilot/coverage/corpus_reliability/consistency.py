@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import csv
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session

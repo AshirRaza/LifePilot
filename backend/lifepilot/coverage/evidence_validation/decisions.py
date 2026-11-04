@@ -5,7 +5,7 @@ These are NOT human_verified. Passages were inspected against stored extractions
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
 

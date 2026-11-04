@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from lifepilot.coverage.pathway_inventory.categories import CATEGORIES, JURISDICTIONS
-from lifepilot.coverage.pathway_inventory.evidence import evidence_summary
 from lifepilot.coverage.pathway_inventory.inventory import inventory_summary
 
 

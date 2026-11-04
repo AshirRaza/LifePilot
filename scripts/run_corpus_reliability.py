@@ -77,19 +77,7 @@ DATA_DIR = ROOT / "data"
 
 
 def _resolve_evidence_csv() -> Path:
-    preferred = RUNS_DIR / EVIDENCE_MATRIX_NAME
-    if preferred.is_file():
-        return preferred
-    # Legacy fallbacks during transition
-    for name in (
-        "phase_6u_evidence_matrix.csv",
-        "phase_6t_evidence_matrix.csv",
-        "phase_6s_evidence_matrix.csv",
-    ):
-        path = RUNS_DIR / name
-        if path.is_file():
-            return path
-    return preferred
+    return RUNS_DIR / EVIDENCE_MATRIX_NAME
 
 
 def cmd_backup(args: argparse.Namespace) -> int:

@@ -1,49 +1,108 @@
 # LifePilot
 
-AI-powered personal life administration platform. It acts as an intelligent case manager for complex life transitions—starting with international relocation, immigration admin, and employment onboarding in the UK.
+LifePilot is an AI-powered personal administration platform intended to act as an intelligent case manager for complex life transitions—starting with international relocation, immigration administration, and employment onboarding.
 
-## Current status
+Today the repository is a **knowledge-base foundation**: curated official government sources are authorized, fetched, versioned, extracted, and assessed for immigration-pathway coverage. The goal is **evidence-backed immigration information** grounded in official documents—not chatbot answers.
 
-Phases completed so far:
+| Evidence class | Meaning |
+|---|---|
+| Verified official evidence | Ingested from approved exact URLs; passages assessed against critical requirements |
+| Provisional readiness | Automated quality gate: all critical cells COMPLETE with passage/doc quality checks |
+| Human-verified readiness | Explicit human review only (`confirm-pathway`); **never** auto-granted |
+| Future AI guidance | Planned (Phases 8–11); not present in this codebase |
 
-1. **Local Postgres** — Docker Compose with PostgreSQL 17 + pgvector; connection smoke test
-2. **Knowledge schema** — SQLAlchemy 2.x models + Alembic migration for government knowledge collection
-3. **Source registry** — curated official seed URLs (GB, DE, NL, CA, EU), idempotent importer, HTTP reachability checks, explicit approval workflow
-4. **Dry-run crawl planner** — allowlist + robots.txt + rate-policy plan for approved seeds
-5. **Seed HTML fetcher** — fetch approved seed URLs only; dry-run by default
-6. **Bounded link discovery** — extract in-allowlist links from stored HTML; fetch in-scope HTML (PDFs listed here; binary download is a separate command)
-7. **HTML content-quality checks** — reject recognizable bot-protection / WAF interstitials (e.g. Radware) before storing versions
-8. **PDF/DOCX download** — discover in-allowlist binary links from stored HTML; validate magic/OOXML; versioned raw storage under `data/raw/`
-9. **Structured HTML extraction** — convert stored HTML versions into ordered JSON blocks (title/headings/paragraphs/lists/tables); raw files unchanged
-10. **Structured PDF/DOCX extraction** — extract searchable text from stored binaries (PDF page provenance; DOCX style hierarchy); no OCR
-11. **Meaningful content comparison** — compare successful extractions across versions (`unchanged` / `changed` / `unavailable`); ignore raw-only diffs; persist structured diffs
-12. **Unified ingestion pipeline** — dry-run/execute orchestration of approved-source fetch → discovery → extract → compare with global safety caps and resumable reruns
-13. **Resumable frontier crawl** — PostgreSQL discovery frontier, sitemap enqueue, exact allowlist URLs, PageSchema links, content-language detection, bounded multi-source collection
-14. **Coverage audit & pathway normalization** (`coverage/normalization`) — inventoried immigration pathways, calibrated denominators, hub vs true-pathway distinction
-15. **Evidence validation & remediation** (`coverage/evidence_validation`, `evidence_remediation`, `source_gap_closure`) — critical-field assessments, exact official URL proposals, provisional readiness (never auto human-verified)
-16. **Pathway inventory** (`coverage/pathway_inventory`) — 13 countries + EU inventory matrix, Express Entry program split, bounded approved-source expansion
-17. **Source expansion & storage integrity** (`coverage/source_expansion`) — conditional exact-URL approvals, AE/JP/FR gap handling, Canada FSW/CEC/FST deep validation, raw-byte SHA256 audit
+Provisional readiness is **not** legal advice, human verification, or permission to rely on the corpus without checking current official requirements.
 
-Not yet implemented: open crawl, OCR, chunking/embeddings/RAG, agents/MCP, API, frontend, or scheduling. Coverage readiness remains automated/provisional until human review.
+## Current architecture
 
-## Prerequisites
+Implemented stack (no FastAPI app, no frontend, no RAG yet):
+
+| Component | Role |
+|---|---|
+| Python 3.11+ | Application and CLI tooling |
+| PostgreSQL 17 + Docker Compose | Durable registry, documents, versions, frontier |
+| SQLAlchemy 2.x + Alembic | Models and migrations |
+| Official source registry | Seed import, HTTPS allowlists, explicit approval |
+| Exact-URL authorization | Fetches stay inside approved patterns; redirects do not widen allowlists |
+| Document ingestion & versioning | HTML/PDF/DOCX fetch, immutable raw bytes, structured extraction, content comparison |
+| Evidence extraction & validation | Critical-requirement assessments, contamination/wrong-pathway rejection |
+| Pathway coverage & readiness | 102 pathways × 5 requirements; provisional vs human-verified readiness |
+| Automated tests | pytest suite covering schema, registry, crawl, extract, coverage |
+
+### Directory structure
+
+```text
+LifePilot/
+├── compose.yaml                 # Postgres + pgvector
+├── .env.example                 # Env template (safe to commit)
+├── check_db.py                  # DB connectivity smoke test
+├── requirements.txt
+├── alembic.ini / alembic/       # Migrations
+├── config/
+│   ├── coverage/                # Pathway seeds, signals, normalization
+│   └── registry/                # Candidate source manifests
+├── backend/lifepilot/
+│   ├── db/                      # SQLAlchemy models + session
+│   ├── registry/                # Source registry, URL scope, review
+│   ├── crawl/                   # Planner, frontier, seed/link/binary discovery
+│   ├── extract/                 # HTML/PDF/DOCX extraction + comparison
+│   ├── ingest/                  # Bounded unified ingestion orchestration
+│   └── coverage/                # Pathway inventory, evidence, corpus reliability
+│       ├── normalization/
+│       ├── evidence_validation/
+│       ├── evidence_remediation/
+│       ├── source_gap_closure/
+│       ├── pathway_inventory/
+│       ├── source_expansion/
+│       └── corpus_reliability/  # Backup, audit, readiness, human review CLI
+├── scripts/                     # Operational CLIs (see below)
+├── tests/
+├── data/                        # Local raw/extracted/compared/runs (gitignored)
+└── backups/                     # Local DB + data backups (gitignored)
+```
+
+## Current project status — Phase 6U
+
+Snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage_matrix.csv`, `data/runs/corpus_status_report.md`, and the live Postgres corpus.
+
+| Metric | Value |
+|---|---:|
+| Jurisdictions | 13 |
+| Immigration pathways | 102 |
+| Documents | 601 |
+| Approved sources | 63 |
+| Document versions | 670 |
+| Coverage cells | 510 |
+| COMPLETE cells | 65 |
+| PARTIAL cells | 62 |
+| MISSING cells | 94 |
+| UNEVALUATED cells | 286 |
+| NOT_APPLICABLE cells | 3 |
+| Provisionally ready pathways | 7 |
+| Human-verified pathways | 0 |
+| Automated tests (current suite) | 386 passed, 2 skipped |
+
+Corpus metrics match the Phase 6U report and live DB. The Phase 6U report also recorded **469 passed, 2 skipped** before one-shot phase runners/tests were retired; the current suite count above is authoritative for this tree.
+
+Provisionally ready pathways (quality-gated, automated only):
+
+`gb_skilled_worker`, `gb_student`, `ie_critical_skills_employment_permit`, `ie_general_employment_permit`, `nl_highly_skilled_migrant`, `nl_naturalisation`, `sg_employment_pass`
+
+Phases 1–6U delivered the knowledge-base foundation through ingestion, provenance, evidence quality gates, and corpus reliability tooling. One-shot phase runners were retired after 6U; durable state lives in the database and in `data/runs/evidence_matrix.csv` / `coverage_matrix.csv`.
+
+## Setup and usage
+
+### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose)
-- Python 3.11+ recommended
+- Python 3.11+
 - Git
 
-## Setup from scratch
-
-### 1. Clone and enter the repo
+### 1. Clone and configure environment
 
 ```bash
 git clone <your-repo-url>
 cd LifePilot
-```
-
-### 2. Configure environment
-
-```bash
 cp .env.example .env
 ```
 
@@ -58,9 +117,9 @@ POSTGRES_PORT=5432
 DATABASE_URL=postgresql+psycopg://lifepilot:your_password_here@localhost:5432/lifepilot
 ```
 
-If the password contains special characters (e.g. `!`, `@`, `#`), URL-encode them in `DATABASE_URL` (e.g. `!` → `%21`). Unencoded `!` can cause connection hangs.
+If the password contains special characters (e.g. `!`, `@`, `#`), URL-encode them in `DATABASE_URL` (e.g. `!` → `%21`).
 
-### 3. Create a virtual environment and install deps
+### 2. Virtual environment and dependencies
 
 **Windows (PowerShell):**
 
@@ -78,31 +137,26 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Start PostgreSQL
+### 3. Start PostgreSQL
 
 ```bash
 docker compose up -d
 docker compose ps
 ```
 
-### 5. Verify the database connection
+### 4. Verify connection and apply migrations
 
 ```bash
 python check_db.py
 ```
 
-Expected:
-
-```text
-PostgreSQL connection successful: 1
-```
-
-### 6. Apply database migrations
+Expected: `PostgreSQL connection successful: 1`
 
 ```powershell
 # Windows PowerShell
 $env:PYTHONPATH = "backend"
 alembic upgrade head
+# or: python scripts/run_migrate.py
 ```
 
 ```bash
@@ -111,173 +165,49 @@ export PYTHONPATH=backend
 alembic upgrade head
 ```
 
-Or: `python scripts/run_migrate.py`
+Optional isolated test database (see comments in `.env.example`):
 
-### 7. Import official seed sources
+```bash
+docker compose exec postgres psql -U lifepilot -d postgres -c "CREATE DATABASE lifepilot_test"
+```
+
+### 5. Import curated seed sources
 
 ```powershell
 $env:PYTHONPATH = "backend"
 python scripts/import_seed_sources.py
 ```
 
-This upserts jurisdictions, authorities, and sources. It is safe to run repeatedly (idempotent).
-
-- New sources are created as `candidate`
-- HTTP reachability is reported only — it does **not** approve or downgrade sources
-- Existing `review_status` values are preserved on re-import
-
-Explicit approval (human review):
+Idempotent upsert. New sources start as `candidate`. HTTP checks do **not** approve sources. Explicit approval example:
 
 ```powershell
 python scripts/import_seed_sources.py --no-verify --set-status gb_skilled_worker_visa=approved
 ```
 
-Allowed statuses: `approved`, `candidate`, `rejected`. Approving requires an HTTPS seed URL and valid allowlist patterns.
+### 6. Ingestion (dry-run by default)
 
-### 8. Dry-run crawl plan (approved sources only)
-
-```powershell
-$env:PYTHONPATH = "backend"
-python scripts/plan_crawl.py
-```
-
-This checks each **approved** source seed against its allowlist and `robots.txt`, then prints what a future fetcher would do. It does **not** download government pages or write `documents` rows (it may fetch `/robots.txt` only).
-
-### 9. Fetch approved seed HTML
-
-Dry-run (default — preflight only, no page download):
-
-```powershell
-python scripts/fetch_seeds.py
-python scripts/fetch_seeds.py --source-id 86
-```
-
-Persist HTML + `documents` / `document_versions` (explicit opt-in; commits per seed):
-
-```powershell
-python scripts/fetch_seeds.py --persist --source-id 86
-python scripts/fetch_seeds.py --persist
-```
-
-Files are stored under `data/raw/documents/{document_id}/v{n}.html` (gitignored). Seed fetch accepts HTML only (bot-protection pages are not stored).
-
-### 10. Bounded HTML link discovery (from stored HTML)
-
-Requires a previously persisted seed document. Dry-run (default — list only):
-
-```powershell
-python scripts/discover_links.py --source-id 86
-python scripts/discover_links.py --document-id 99
-```
-
-Persist in-scope HTML links (capped per run; PDFs/DOCX are listed but not downloaded here):
-
-```powershell
-python scripts/discover_links.py --source-id 86 --persist
-```
-
-Discovery stays inside each source’s allowlist. It does not spider the open web. Host pacing honors robots.txt `Crawl-delay` (or the policy default).
-
-### 11. PDF/DOCX download (from stored HTML)
-
-```powershell
-python scripts/discover_documents.py --source-id N
-python scripts/discover_documents.py --source-id N --persist
-python scripts/discover_documents.py --source-id N --persist --max-documents 3
-```
-
-Downloads in-allowlist PDF/DOCX only (magic/OOXML validated). Default cap is 3 binaries per run. Stored as `data/raw/documents/{document_id}/v{n}.pdf` or `.docx`.
-
-### 12. Structured extraction (from stored versions)
-
-Primary CLI: `scripts/extract_documents.py` (HTML/PDF/DOCX). `scripts/extract_html.py` remains a thin HTML-only compatibility wrapper.
-
-Reads existing raw files only — no crawl or download. Dry-run (default):
-
-```powershell
-python scripts/extract_documents.py --document-id 99
-python scripts/extract_documents.py --pdf --document-id 333
-python scripts/extract_documents.py --kinds html,pdf,docx --max-documents 5
-python scripts/extract_html.py --document-id 99
-```
-
-Persist derived JSON + `document_extractions` (explicit opt-in; commits per document version):
-
-```powershell
-python scripts/extract_documents.py --persist --pdf --max-documents 3
-python scripts/extract_html.py --persist --document-id 99
-```
-
-Output lives under `data/extracted/documents/{document_id}/v{n}.{extractor}.json` (gitignored). Documents with `discovery_status=rejected` are skipped. Raw `data/raw/` files are never rewritten. Re-running the same extractor version with the same content hash is a no-op (`unchanged`); bumping an extractor version updates the current extraction row for that `(document_version_id, extractor_name)`.
-
-### 13. Meaningful content comparison (from stored extractions)
-
-Compares successful compatible extractions across document versions. Does **not** crawl, download, or extract. Dry-run (default):
-
-```powershell
-python scripts/compare_documents.py --document-id 99
-python scripts/compare_documents.py --previous-version-id A --current-version-id B
-python scripts/compare_documents.py --max-documents 10
-```
-
-Persist comparison JSON + `document_content_comparisons` (explicit opt-in):
-
-```powershell
-python scripts/compare_documents.py --persist --document-id 99
-```
-
-Statuses: `unchanged` (normalized extracted content identical), `changed` (textual differences), `unavailable` (missing/failed/incompatible extractions — with an explicit reason). Raw SHA-256 differences alone do not imply a meaningful change. Output lives under `data/compared/documents/...` when persisted.
-
-### 14. Unified ingestion pipeline
-
-One command orchestrates approved-source seed fetch, bounded HTML/PDF/DOCX discovery, structured extraction, and consecutive-version comparison. It reuses the existing crawl/extract/compare modules (no second crawling system).
-
-Modes:
-- `full` (default) — fetch/discover + extract/compare
-- `process-existing` — extract/compare stored raw versions only (**zero HTTP**, including robots.txt)
-
-Dry-run (default — **no network**, no DB/filesystem writes):
+Unified pipeline (approved sources only; bounded caps):
 
 ```powershell
 $env:PYTHONPATH = "backend"
 python scripts/run_ingestion.py --source-id 86
-python scripts/run_ingestion.py --max-sources 1 --json
-python scripts/run_ingestion.py --mode process-existing --all-approved --json
-```
-
-Execute (explicit opt-in; conservatively bounded):
-
-```powershell
 python scripts/run_ingestion.py --source-id 86 --execute
-python scripts/run_ingestion.py --source-id 86 --execute --max-fetches 5 --max-extractions 10 --max-comparisons 10
-python scripts/run_ingestion.py --mode process-existing --all-approved --execute --max-extractions 20 --max-comparisons 20
-python scripts/run_ingestion.py --all-approved --execute --max-fetches 5
+python scripts/run_ingestion.py --mode process-existing --all-approved --execute
 ```
 
-Source selection: one `--source-id`, a bounded `--max-sources` set, or `--all-approved` (deterministic `id` order). Candidate/unapproved sources are never selected.
+Supporting CLIs (also dry-run unless `--persist` / `--execute`):
 
-Default limits: `max_sources=1`, `max_fetches=5`, `max_html_per_source=3`, `max_binary_per_source=2`, `max_extractions=10`, `max_comparisons=10`. Global fetch/extract/compare budgets apply across the whole run (not reset per source). Robots.txt preflight is outside the document-fetch budget.
-
-Resumability: identical raw content does not create duplicate versions; compatible successful extractions are skipped; comparison persistence stays idempotent. Interrupted runs and extraction backlogs can be re-executed safely (`process-existing` until backlog is exhausted). Execute mode writes a JSON summary under `data/runs/` (gitignored) with per-source counts, backlogs, and limit flags.
-
-Does not widen allowlists, bypass bot protection, approve sources, or crawl unbounded.
-
-### 15. Coverage pipeline (official immigration knowledge base)
-
-These commands deepen **inventory → source → ingestion → evidence** coverage. They reuse the existing registry, crawler, and immutable document store. They do **not** build RAG, APIs, or frontend.
-
-Packages live under `backend/lifepilot/coverage/`:
-
-| Package | Role |
+| Script | Purpose |
 |---|---|
-| `normalization` | Pathway hub vs true-pathway normalization; calibrated coverage denominators |
-| `evidence_validation` | Critical-field rules; heading-only COMPLETE forbidden |
-| `evidence_remediation` | Corpus-backed field repairs and source proposals |
-| `source_gap_closure` | Exact approved-URL gap closure (e.g. ICA checklist) |
-| `pathway_inventory` | Country × category inventory for GB/DE/NL/SG/US/AU/CA/NZ/IE/CH/AE/JP/FR + EU |
-| `source_expansion` | Owner-authorized exact URL validation/approval, bounded ingest, Canada program evidence, storage integrity |
+| `scripts/plan_crawl.py` | Dry-run crawl plan for approved sources |
+| `scripts/fetch_seeds.py` | Seed HTML fetch |
+| `scripts/discover_links.py` | Bounded HTML link discovery |
+| `scripts/discover_documents.py` | PDF/DOCX discovery/download |
+| `scripts/extract_documents.py` | Structured extraction |
+| `scripts/compare_documents.py` | Meaningful content comparison |
+| `scripts/set_source_patterns.py` | Explicit allowlist change (`--confirm-expand` to widen) |
 
-Run (dry artifacts under `data/runs/`, gitignored; DB writes only when a phase script executes ingestion/approvals):
+Coverage pipeline (inventory → validation → remediation → expansion):
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -290,64 +220,94 @@ python scripts/run_pathway_inventory.py
 python scripts/run_source_expansion.py
 ```
 
-Allowlist changes still require explicit review (`scripts/set_source_patterns.py --confirm-expand`). New authorities/domains are never auto-approved. Historical `data/runs/phase_6*` report filenames are retained for audit traceability.
-
-Coverage tests:
+### 7. Corpus reliability CLI
 
 ```powershell
-pytest tests/test_pathway_normalization.py tests/test_evidence_validation.py tests/test_evidence_remediation.py tests/test_source_gap_closure.py tests/test_pathway_inventory.py tests/test_source_expansion.py -q
+$env:PYTHONPATH = "backend"
+python scripts/run_corpus_reliability.py status
+python scripts/run_corpus_reliability.py status --with-db
+python scripts/run_corpus_reliability.py backup
+python scripts/run_corpus_reliability.py readiness-audit
+python scripts/run_corpus_reliability.py consistency-audit
+python scripts/run_corpus_reliability.py discovery
 ```
 
-### 16. Run tests
+Human review (never automatic):
+
+```powershell
+python scripts/run_corpus_reliability.py review --pathway-id PATH --requirement eligibility --decision confirm --reviewer YOU
+python scripts/run_corpus_reliability.py confirm-pathway --pathway-id PATH --reviewer YOU
+```
+
+### 8. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
 pytest -v
 ```
 
+## Evidence quality and safety
+
+- **Authorization:** Only HTTPS sources with explicit `approved` status and path-scoped allowlist patterns are fetchable. Exact-URL controls apply; redirects must not silently widen allowlists.
+- **Provenance & versioning:** Each document URL has versioned raw snapshots (`document_versions`); extractions and comparisons are derived and do not rewrite raw bytes.
+- **Quality gates:** Heading-only or navigational passages cannot mark a critical requirement COMPLETE. Cross-jurisdiction and wrong-pathway associations are rejected.
+- **Contamination controls:** Blocklists and applicability checks prevent off-purpose forms or foreign-jurisdiction pages from completing a cell.
+- **Readiness:** `pathway_is_provisionally_ready` is automated and quality-gated. Human-verified readiness requires an explicit `confirm-pathway` decision. **0 pathways are human-verified.**
+- **Operational caution:** Always verify current official government requirements before relying on any immigration guidance derived from this corpus.
+
+## Development roadmap
+
+| Phase | Scope | Status |
+|---|---|---|
+| Phases 1–6U | Knowledge-base foundation, ingestion, provenance, evidence quality | Implemented to current scope |
+| Phase 7 | Six external knowledge source integrations | Planned |
+| Phase 8 | Internal RAG with embeddings and pgvector | Planned |
+| Phase 9 | AI agent combining internal and external evidence | Planned |
+| Phase 10 | FastAPI backend | Planned |
+| Phase 11 | Frontend and MVP | Planned |
+
+### Phase 7 — planned integrations (not operational)
+
+| Source | Notes |
+|---|---|
+| GOV.UK Content API | Public API |
+| Canada Open Government | Public open-data APIs |
+| EU Open Data Portal | Public open-data APIs |
+| EUR-Lex / CELLAR | Public legal API |
+| US Federal Register | Public API |
+| EU Immigration Portal | Website; supported programmatic access not yet confirmed |
+
+Do not treat these as live connectors. Public APIs still require design for authorization, caching, provenance, and rate limits before use.
+
+## Knowledge schema (overview)
+
+| Table | Purpose |
+|---|---|
+| `jurisdictions` | Countries, regions, municipalities, EU, etc. |
+| `authorities` | Publishing government bodies |
+| `sources` | Curated seed URLs + explicit `review_status` |
+| `documents` | One row per normalized URL / language variant |
+| `document_versions` | Historical raw snapshots; at most one `is_current` per document |
+| `document_extractions` | Derived structured content per version + extractor |
+| `document_content_comparisons` | Meaningful content diffs between versions |
+| `document_jurisdictions` | Explicit applicability (never inferred from hierarchy alone) |
+| `discovery_frontier` | Resumable bounded crawl frontier |
+
 ## Useful commands
 
 | Command | Purpose |
 |---|---|
-| `docker compose up -d` | Start Postgres in the background |
-| `docker compose down` | Stop containers (keeps data volume) |
-| `docker compose down -v` | Stop and **delete** the Postgres data volume |
-| `docker compose logs -f postgres` | Tail Postgres logs |
-| `python check_db.py` | Smoke-test SQLAlchemy → Postgres |
+| `docker compose up -d` | Start Postgres |
+| `docker compose down` | Stop containers (keeps volume) |
+| `python check_db.py` | Smoke-test DB connection |
 | `alembic upgrade head` | Apply migrations (`PYTHONPATH=backend`) |
-| `alembic current` | Show current migration revision |
-| `python scripts/import_seed_sources.py` | Upsert curated official seed sources |
-| `python scripts/plan_crawl.py` | Dry-run crawl plan for approved sources |
-| `python scripts/fetch_seeds.py` | Dry-run seed fetch preflight |
-| `python scripts/fetch_seeds.py --persist` | Download/store approved seed HTML |
-| `python scripts/discover_links.py --source-id N` | Dry-run HTML link discovery from stored HTML |
-| `python scripts/discover_links.py --source-id N --persist` | Fetch in-scope discovered HTML |
-| `python scripts/mark_document_discovery_status.py` | Explicitly exclude/include a document for discovery |
-| `python scripts/set_source_patterns.py` | Explicit allowlist change (requires `--confirm-expand` to widen) |
-| `python scripts/discover_documents.py --source-id N` | Dry-run PDF/DOCX discovery from stored HTML |
-| `python scripts/discover_documents.py --source-id N --persist` | Download/store in-scope PDF/DOCX (default max 3) |
-| `python scripts/extract_documents.py` | Dry-run structured extraction (HTML/PDF/DOCX) |
-| `python scripts/extract_documents.py --persist --pdf --document-id N` | Persist extraction JSON + DB row |
-| `python scripts/extract_html.py` | Thin HTML-only wrapper around extract_documents |
-| `python scripts/compare_documents.py --document-id N` | Dry-run meaningful content comparison |
-| `python scripts/compare_documents.py --persist --document-id N` | Persist comparison JSON + DB row |
-| `python scripts/run_ingestion.py --source-id N` | Dry-run unified ingestion plan |
-| `python scripts/run_ingestion.py --source-id N --execute` | Bounded fetch/extract/compare run |
-| `python scripts/run_ingestion.py --mode process-existing --all-approved --execute` | Drain extraction/compare backlog (no HTTP) |
-| `python scripts/run_ingestion.py --all-approved --execute` | Multi-source full ingest under global budgets |
-| `python scripts/run_ingestion.py --country SG` | Dry-run approved sources for one jurisdiction/country |
-| `python scripts/import_registry_config.py --config config/registry/global_candidates.json` | Import candidate countries/sources + approval manifest |
-| `python scripts/set_source_patterns.py --source-id N --pattern URL --confirm-expand` | Explicit allowlist widen after review |
-| `python scripts/run_coverage_audit.py` | Country coverage audit inventory/matrix |
-| `python scripts/run_pathway_normalization.py` | Normalize hubs vs true pathways; calibrate denominators |
-| `python scripts/run_evidence_validation.py` | Critical-field evidence validation / provisional readiness |
-| `python scripts/run_evidence_remediation.py` | Evidence repairs against ingested corpus |
-| `python scripts/run_source_gap_closure.py` | Exact official URL gap closure under approved scopes |
-| `python scripts/run_pathway_inventory.py` | Systematic pathway inventory + bounded coverage expansion |
-| `python scripts/run_source_expansion.py` | Conditional exact-URL approvals, ingest, storage integrity |
-| `pytest -v` | Run schema + registry + crawl + extract + coverage tests |
+| `python scripts/import_seed_sources.py` | Upsert curated official seeds |
+| `python scripts/run_ingestion.py --source-id N` | Dry-run unified ingestion |
+| `python scripts/run_ingestion.py --source-id N --execute` | Bounded execute |
+| `python scripts/run_corpus_reliability.py status` | Coverage / readiness summary |
+| `pytest -v` | Full test suite |
 
-### Inspect tables in Postgres
+### Inspect tables
 
 ```bash
 docker compose exec -T postgres psql -U lifepilot -d lifepilot
@@ -356,119 +316,12 @@ docker compose exec -T postgres psql -U lifepilot -d lifepilot
 ```sql
 \dt
 SELECT id, name, seed_url, review_status FROM sources ORDER BY id;
-\d documents
-\d document_versions
 ```
 
-## Project layout (so far)
+## Storage persistence
 
-```text
-LifePilot/
-├── compose.yaml                 # Postgres + pgvector (named volume postgres_data)
-├── .env.example                 # Env template (safe to commit)
-├── .env                         # Local secrets (gitignored)
-├── check_db.py                  # DB connectivity smoke test
-├── requirements.txt
-├── alembic.ini
-├── alembic/                     # Migrations
-├── config/
-│   ├── coverage/                # Pathway seeds, signals, normalization config
-│   └── registry/                # Candidate source manifests (import as candidate)
-├── backend/lifepilot/
-│   ├── db/                      # SQLAlchemy models + session
-│   ├── registry/                # Seed registry (import, verify, review, URL scope)
-│   ├── crawl/                   # Planner, frontier, seed/link/binary discovery
-│   ├── extract/                 # Structured HTML/PDF/DOCX extraction + comparison
-│   ├── ingest/                  # Unified bounded ingestion orchestration
-│   └── coverage/                # Immigration pathway coverage & evidence pipeline
-│       ├── normalization/
-│       ├── evidence_validation/
-│       ├── evidence_remediation/
-│       ├── source_gap_closure/
-│       ├── pathway_inventory/
-│       └── source_expansion/
-├── data/                        # Raw + extracted + compared + run reports (gitignored)
-│   ├── raw/documents/           # Immutable HTML/PDF/DOCX bytes (host filesystem)
-│   ├── extracted/
-│   ├── compared/
-│   └── runs/                    # Coverage baselines/reports (phase_6* filenames kept)
-├── tests/                       # Schema + registry + crawl + extract + coverage tests
-├── scripts/
-│   ├── run_migrate.py
-│   ├── import_seed_sources.py
-│   ├── import_registry_config.py
-│   ├── plan_crawl.py
-│   ├── fetch_seeds.py
-│   ├── discover_links.py
-│   ├── mark_document_discovery_status.py
-│   ├── set_source_patterns.py
-│   ├── discover_documents.py
-│   ├── extract_html.py
-│   ├── extract_documents.py
-│   ├── compare_documents.py
-│   ├── run_ingestion.py
-│   ├── run_coverage_audit.py
-│   ├── run_pathway_normalization.py
-│   ├── run_evidence_validation.py
-│   ├── run_evidence_remediation.py
-│   ├── run_source_gap_closure.py
-│   ├── run_pathway_inventory.py
-│   └── run_source_expansion.py
-├── pytest.ini
-├── .gitignore
-└── README.md
-```
-
-## Knowledge schema (overview)
-
-| Table | Purpose |
-|---|---|
-| `jurisdictions` | Countries, regions, municipalities, EU (supranational), etc. |
-| `authorities` | Publishing government bodies |
-| `sources` | Curated seed URLs + explicit `review_status` |
-| `documents` | One row per normalized URL / language variant |
-| `document_versions` | Historical raw snapshots; at most one `is_current` per document |
-| `document_extractions` | Derived structured content per version + extractor (raw files immutable) |
-| `document_content_comparisons` | Meaningful content diffs between two versions (idempotent; no silent overwrite) |
-| `document_jurisdictions` | Explicit applicability (never inferred from hierarchy alone) |
-
-## Source registry / crawl safety notes
-
-- Seed metadata is separate from downloaded documents
-- Allowlist patterns use a narrow path scope (`https://host/path*`); matching requires exact scheme/host and genuine path descendants — not naive string prefixes
-- HTTP verification and fetching use a transparent LifePilot user-agent (`LifePilotFetcher` for HTML/PDF/DOCX) and do not impersonate a browser
-- Successful HTTP checks are **not** content authenticity; `robots.txt`, terms, and site policies still apply
-- Host pacing uses robots.txt `Crawl-delay` when present (otherwise `default_crawl_delay_seconds`, floored by `min_crawl_delay_seconds`). `max_requests_per_host_per_minute` is advisory for planning/reporting only — not enforced as a hard fetcher limit
-- Per-run caps: discovered HTML fetches, discovered binary fetches, max response bytes, max redirects, blocked private/loopback hosts
-- Link discovery is bounded: only in-allowlist URLs from stored HTML; HTML fetch via `discover_links.py`, PDF/DOCX via `discover_documents.py`
-- Fetched HTML that looks like a bot-protection interstitial is not stored as a successful version; sources stay approved
-- Storage path reads use resolved-path containment (`Path.is_relative_to`); batch persist commits per document/version
-- Approved allowlists do not widen on seed re-import; use `scripts/set_source_patterns.py --confirm-expand` for intentional expansions
-
-## Stack (planned)
-
-| Layer | Choice |
-|---|---|
-| Frontend | Next.js, React, TypeScript, Tailwind |
-| Backend | Python, FastAPI, Pydantic |
-| Database | PostgreSQL, SQLAlchemy, Alembic, pgvector |
-| AI | LangGraph/LangChain, OpenAI and/or Anthropic |
-| Infra | Docker, GitHub Actions |
-
-## Storage persistence note
-
-- **Raw document bytes** live on the host under `data/raw/` (gitignored).
-- **Postgres** uses the Docker named volume `postgres_data` in `compose.yaml`.
-- Backups must include **both** the database volume and the `data/` tree. SHA256 on `document_versions` can be recomputed from stored files for integrity checks.
-
-## Next steps
-
-Priority remaining coverage work (before RAG/API/frontend):
-
-1. Approve/research current official pages for JP (ISA status) and FR (passeport talent)—prior candidates were 404 or hub-only
-2. Pathway-specific AE pages beyond the federal visa hub
-3. Canada Express Entry invitation document checklist (FSW/CEC/FST docs still PARTIAL)
-4. Human verification of provisionally ready pathways
-5. Only then: chunking/embeddings/RAG and API/frontend—built incrementally
+- **Raw document bytes** live under `data/raw/` (gitignored).
+- **Postgres** uses the Docker named volume `postgres_data`.
+- Backups must include **both** the database dump and the `data/` tree (`scripts/run_corpus_reliability.py backup`).
 
 Do not wipe historical raw/extraction/comparison versions unless explicitly intended. Do not treat a government URL alone as proof of a complete immigration requirement.
