@@ -27,7 +27,8 @@ Implemented stack (no FastAPI app, no frontend, no RAG yet):
 | Document ingestion & versioning | HTML/PDF/DOCX fetch, immutable raw bytes, structured extraction, content comparison |
 | Evidence extraction & validation | Critical-requirement assessments, contamination/wrong-pathway rejection |
 | Pathway coverage & readiness | 102 pathways × 5 requirements; provisional vs human-verified readiness |
-| Automated tests | pytest suite covering schema, registry, crawl, extract, coverage |
+| External knowledge connectors | Phase 7 read-only public APIs (GOV.UK, Canada Open, data.europa.eu, CELLAR, Federal Register; EU Immigration Portal gated) |
+| Automated tests | pytest suite covering schema, registry, crawl, extract, coverage, external |
 
 ### Directory structure
 
@@ -47,14 +48,15 @@ LifePilot/
 │   ├── crawl/                   # Planner, frontier, seed/link/binary discovery
 │   ├── extract/                 # HTML/PDF/DOCX extraction + comparison
 │   ├── ingest/                  # Bounded unified ingestion orchestration
-│   └── coverage/                # Pathway inventory, evidence, corpus reliability
-│       ├── normalization/
-│       ├── evidence_validation/
-│       ├── evidence_remediation/
-│       ├── source_gap_closure/
-│       ├── pathway_inventory/
-│       ├── source_expansion/
-│       └── corpus_reliability/  # Backup, audit, readiness, human review CLI
+│   ├── coverage/                # Pathway inventory, evidence, corpus reliability
+│   │   ├── normalization/
+│   │   ├── evidence_validation/
+│   │   ├── evidence_remediation/
+│   │   ├── source_gap_closure/
+│   │   ├── pathway_inventory/
+│   │   ├── source_expansion/
+│   │   └── corpus_reliability/  # Backup, audit, readiness, human review CLI
+│   └── external/                # Phase 7 external API connectors + router
 ├── scripts/                     # Operational CLIs (see below)
 ├── tests/
 ├── data/                        # Local raw/extracted/compared/runs (gitignored)
@@ -239,7 +241,26 @@ python scripts/run_corpus_reliability.py review --pathway-id PATH --requirement 
 python scripts/run_corpus_reliability.py confirm-pathway --pathway-id PATH --reviewer YOU
 ```
 
-### 8. Run tests
+### 8. External knowledge retrieval (Phase 7)
+
+Read-only public API discovery. Does **not** ingest documents, widen allowlists, or change coverage readiness. Results are always `unverified_external`.
+
+```powershell
+$env:PYTHONPATH = "backend"
+python scripts/query_external_knowledge.py --status
+python scripts/query_external_knowledge.py --pathway-id gb_skilled_worker --jurisdiction GB
+python scripts/query_external_knowledge.py --query immigration --jurisdiction CA --provider canada_open --json
+python scripts/run_external_live_smoke.py
+```
+
+Optional live pytest smoke (off by default):
+
+```powershell
+$env:LIFEPILOT_LIVE_EXTERNAL = "1"
+pytest tests/test_external_knowledge.py::test_live_govuk_smoke -q
+```
+
+### 9. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -260,24 +281,24 @@ pytest -v
 | Phase | Scope | Status |
 |---|---|---|
 | Phases 1–6U | Knowledge-base foundation, ingestion, provenance, evidence quality | Implemented to current scope |
-| Phase 7 | Six external knowledge source integrations | Planned |
+| Phase 7 | Six external knowledge source integrations | Implemented (portal gated) |
 | Phase 8 | Internal RAG with embeddings and pgvector | Planned |
 | Phase 9 | AI agent combining internal and external evidence | Planned |
 | Phase 10 | FastAPI backend | Planned |
 | Phase 11 | Frontend and MVP | Planned |
 
-### Phase 7 — planned integrations (not operational)
+### Phase 7 — external connectors
 
-| Source | Notes |
+| Source | Status |
 |---|---|
-| GOV.UK Content API | Public API |
-| Canada Open Government | Public open-data APIs |
-| EU Open Data Portal | Public open-data APIs |
-| EUR-Lex / CELLAR | Public legal API |
-| US Federal Register | Public API |
-| EU Immigration Portal | Website; supported programmatic access not yet confirmed |
+| GOV.UK Content API | Working (public JSON by path) |
+| Canada Open Government | Working (CKAN dataset search; not IRCC eligibility) |
+| EU Open Data Portal | Working (dataset search metadata) |
+| EUR-Lex / CELLAR | Working (SPARQL + CELEX resource; SOAP search needs registration) |
+| US Federal Register | Working (documents.json search) |
+| EU Immigration Portal | Owner action required — no public API; exact URL approval needed |
 
-Do not treat these as live connectors. Public APIs still require design for authorization, caching, provenance, and rate limits before use.
+External responses never become verified pathway evidence automatically. See `data/runs/phase_7_report.md`.
 
 ## Knowledge schema (overview)
 
@@ -305,6 +326,9 @@ Do not treat these as live connectors. Public APIs still require design for auth
 | `python scripts/run_ingestion.py --source-id N` | Dry-run unified ingestion |
 | `python scripts/run_ingestion.py --source-id N --execute` | Bounded execute |
 | `python scripts/run_corpus_reliability.py status` | Coverage / readiness summary |
+| `python scripts/query_external_knowledge.py --status` | List external providers |
+| `python scripts/query_external_knowledge.py --pathway-id gb_student` | Query external guidance |
+| `python scripts/run_external_live_smoke.py` | Live read-only provider smoke |
 | `pytest -v` | Full test suite |
 
 ### Inspect tables
