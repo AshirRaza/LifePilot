@@ -2,14 +2,15 @@
 
 LifePilot is an AI-powered personal administration platform intended to act as an intelligent case manager for complex life transitions—starting with international relocation, immigration administration, and employment onboarding.
 
-Today the repository is a **knowledge-base foundation**: curated official government sources are authorized, fetched, versioned, extracted, and assessed for immigration-pathway coverage. The goal is **evidence-backed immigration information** grounded in official documents—not chatbot answers.
+Today the repository is a **knowledge-base foundation**: curated official government sources are authorized, fetched, versioned, extracted, and assessed for immigration-pathway coverage. Read-only connectors can also query selected public government APIs. The goal is **evidence-backed immigration information** grounded in official documents—not chatbot answers.
 
 | Evidence class | Meaning |
 |---|---|
 | Verified official evidence | Ingested from approved exact URLs; passages assessed against critical requirements |
 | Provisional readiness | Automated quality gate: all critical cells COMPLETE with passage/doc quality checks |
 | Human-verified readiness | Explicit human review only (`confirm-pathway`); **never** auto-granted |
-| Future AI guidance | Planned (Phases 8–11); not present in this codebase |
+| External API results | Always `unverified_external`; never auto-promoted into verified pathway evidence |
+| Future AI guidance | Planned; not present in this codebase |
 
 Provisional readiness is **not** legal advice, human verification, or permission to rely on the corpus without checking current official requirements.
 
@@ -27,7 +28,7 @@ Implemented stack (no FastAPI app, no frontend, no RAG yet):
 | Document ingestion & versioning | HTML/PDF/DOCX fetch, immutable raw bytes, structured extraction, content comparison |
 | Evidence extraction & validation | Critical-requirement assessments, contamination/wrong-pathway rejection |
 | Pathway coverage & readiness | 102 pathways × 5 requirements; provisional vs human-verified readiness |
-| External knowledge connectors | Phase 7 read-only public APIs (GOV.UK, Canada Open, data.europa.eu, CELLAR, Federal Register; EU Immigration Portal gated) |
+| External knowledge connectors | Read-only public APIs (GOV.UK, Canada Open, data.europa.eu, CELLAR, Federal Register; EU Immigration Portal gated) |
 | Automated tests | pytest suite covering schema, registry, crawl, extract, coverage, external |
 
 ### Directory structure
@@ -56,16 +57,16 @@ LifePilot/
 │   │   ├── pathway_inventory/
 │   │   ├── source_expansion/
 │   │   └── corpus_reliability/  # Backup, audit, readiness, human review CLI
-│   └── external/                # Phase 7 external API connectors + router
+│   └── external/                # External API connectors + router
 ├── scripts/                     # Operational CLIs (see below)
 ├── tests/
 ├── data/                        # Local raw/extracted/compared/runs (gitignored)
 └── backups/                     # Local DB + data backups (gitignored)
 ```
 
-## Current project status — Phase 6U
+## Current project status
 
-Snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage_matrix.csv`, `data/runs/corpus_status_report.md`, and the live Postgres corpus.
+Corpus snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage_matrix.csv` and the live Postgres corpus. Test counts below are from the current suite (**2026-11-05**).
 
 | Metric | Value |
 |---|---:|
@@ -82,15 +83,13 @@ Snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage_matrix
 | NOT_APPLICABLE cells | 3 |
 | Provisionally ready pathways | 7 |
 | Human-verified pathways | 0 |
-| Automated tests (current suite) | 386 passed, 2 skipped |
-
-Corpus metrics match the Phase 6U report and live DB. The Phase 6U report also recorded **469 passed, 2 skipped** before one-shot phase runners/tests were retired; the current suite count above is authoritative for this tree.
+| Automated tests | 408 passed, 3 skipped |
 
 Provisionally ready pathways (quality-gated, automated only):
 
 `gb_skilled_worker`, `gb_student`, `ie_critical_skills_employment_permit`, `ie_general_employment_permit`, `nl_highly_skilled_migrant`, `nl_naturalisation`, `sg_employment_pass`
 
-Phases 1–6U delivered the knowledge-base foundation through ingestion, provenance, evidence quality gates, and corpus reliability tooling. One-shot phase runners were retired after 6U; durable state lives in the database and in `data/runs/evidence_matrix.csv` / `coverage_matrix.csv`.
+Durable coverage state lives in the database and in `data/runs/evidence_matrix.csv` / `coverage_matrix.csv`.
 
 ## Setup and usage
 
@@ -241,7 +240,7 @@ python scripts/run_corpus_reliability.py review --pathway-id PATH --requirement 
 python scripts/run_corpus_reliability.py confirm-pathway --pathway-id PATH --reviewer YOU
 ```
 
-### 8. External knowledge retrieval (Phase 7)
+### 8. External knowledge retrieval
 
 Read-only public API discovery. Does **not** ingest documents, widen allowlists, or change coverage readiness. Results are always `unverified_external`.
 
@@ -274,20 +273,10 @@ pytest -v
 - **Quality gates:** Heading-only or navigational passages cannot mark a critical requirement COMPLETE. Cross-jurisdiction and wrong-pathway associations are rejected.
 - **Contamination controls:** Blocklists and applicability checks prevent off-purpose forms or foreign-jurisdiction pages from completing a cell.
 - **Readiness:** `pathway_is_provisionally_ready` is automated and quality-gated. Human-verified readiness requires an explicit `confirm-pathway` decision. **0 pathways are human-verified.**
+- **External APIs:** Successful HTTP responses are not verified pathway evidence and do not change COMPLETE/PARTIAL/MISSING classifications.
 - **Operational caution:** Always verify current official government requirements before relying on any immigration guidance derived from this corpus.
 
-## Development roadmap
-
-| Phase | Scope | Status |
-|---|---|---|
-| Phases 1–6U | Knowledge-base foundation, ingestion, provenance, evidence quality | Implemented to current scope |
-| Phase 7 | Six external knowledge source integrations | Implemented (portal gated) |
-| Phase 8 | Internal RAG with embeddings and pgvector | Planned |
-| Phase 9 | AI agent combining internal and external evidence | Planned |
-| Phase 10 | FastAPI backend | Planned |
-| Phase 11 | Frontend and MVP | Planned |
-
-### Phase 7 — external connectors
+## External connectors
 
 | Source | Status |
 |---|---|
@@ -298,7 +287,16 @@ pytest -v
 | US Federal Register | Working (documents.json search) |
 | EU Immigration Portal | Owner action required — no public API; exact URL approval needed |
 
-External responses never become verified pathway evidence automatically. See `data/runs/phase_7_report.md`.
+## Development roadmap
+
+| Scope | Status |
+|---|---|
+| Knowledge-base foundation, ingestion, provenance, evidence quality | Implemented |
+| External public-API knowledge connectors | Implemented (EU Immigration Portal gated) |
+| Internal RAG with embeddings and pgvector | Planned |
+| AI agent combining internal and external evidence | Planned |
+| FastAPI backend | Planned |
+| Frontend and MVP | Planned |
 
 ## Knowledge schema (overview)
 
