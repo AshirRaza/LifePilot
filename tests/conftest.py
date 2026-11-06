@@ -55,6 +55,25 @@ def test_database_url() -> str:
         )
         # Test DB only (guard above): start every run from empty tables.
         conn.execute(text(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE"))
+        # Re-seed planned embedding model (migration seed is wiped by TRUNCATE).
+        from lifepilot.db.models import (
+            PLANNED_EMBEDDING_DIMENSIONS,
+            PLANNED_EMBEDDING_MODEL_ID,
+        )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO embedding_models
+                    (id, display_name, dimensions, distance_metric, notes)
+                VALUES
+                    (:id, 'Multilingual E5 Small', :dims, 'cosine',
+                     'Test DB seed after truncate')
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {"id": PLANNED_EMBEDDING_MODEL_ID, "dims": PLANNED_EMBEDDING_DIMENSIONS},
+        )
     return TEST_DATABASE_URL
 
 

@@ -15,6 +15,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from lifepilot.db.base import Base  # noqa: E402
 from lifepilot.db import models  # noqa: E402, F401
+from lifepilot.db.url import normalize_database_url  # noqa: E402
 
 config = context.config
 target_metadata = Base.metadata
@@ -25,7 +26,7 @@ def get_database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set")
-    return url
+    return normalize_database_url(url)
 
 
 def run_migrations_offline() -> None:

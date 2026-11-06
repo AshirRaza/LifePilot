@@ -28,6 +28,8 @@ from sqlalchemy import Connection, create_engine, delete, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
+from lifepilot.db.url import normalize_database_url
+
 DEFAULT_TEST_DATABASE_NAME = "lifepilot_test"
 TEST_DATABASE_URL_ENV = "LIFEPILOT_TEST_DATABASE_URL"
 APP_DATABASE_URL_ENV = "LIFEPILOT_APP_DATABASE_URL"
@@ -81,14 +83,14 @@ def resolve_test_database_url(environ: Mapping[str, str]) -> str:
     """Return the test DB URL from env, deriving it from the app URL if unset."""
     explicit = environ.get(TEST_DATABASE_URL_ENV)
     if explicit:
-        return explicit
+        return normalize_database_url(explicit)
     app_url = environ.get(APP_DATABASE_URL_ENV) or environ.get(DATABASE_URL_ENV)
     if not app_url:
         raise UnsafeTestDatabaseError(
             f"Set {TEST_DATABASE_URL_ENV} or {DATABASE_URL_ENV} to run DB tests."
         )
-    return make_url(app_url).set(database=DEFAULT_TEST_DATABASE_NAME).render_as_string(
-        hide_password=False
+    return normalize_database_url(
+        make_url(app_url).set(database=DEFAULT_TEST_DATABASE_NAME)
     )
 
 
@@ -101,17 +103,18 @@ def redirect_environment_to_test_database(environ: dict[str, str]) -> str:
     """
     app_url = environ.get(APP_DATABASE_URL_ENV) or environ.get(DATABASE_URL_ENV)
     if app_url and APP_DATABASE_URL_ENV not in environ:
+        # Preserve the original app URL string for guard comparisons / tests.
         environ[APP_DATABASE_URL_ENV] = app_url
     test_url = resolve_test_database_url(environ)
     assert_safe_test_database(test_url, environ.get(APP_DATABASE_URL_ENV))
-    environ[DATABASE_URL_ENV] = test_url
+    environ[DATABASE_URL_ENV] = normalize_database_url(test_url)
     return test_url
 
 
 def ensure_test_database_exists(test_url: str | URL, app_url: str | URL | None) -> bool:
     """CREATE DATABASE for the (guard-verified) test DB if missing."""
     assert_safe_test_database(test_url, app_url)
-    url = make_url(test_url)
+    url = make_url(normalize_database_url(test_url))
     name = url.database
     assert name is not None
     admin = create_engine(
@@ -140,9 +143,7 @@ def migrate_test_database(test_url: str | URL) -> None:
 
     assert_safe_test_database(test_url)
     previous = os.environ.get(DATABASE_URL_ENV)
-    os.environ[DATABASE_URL_ENV] = make_url(test_url).render_as_string(
-        hide_password=False
-    )
+    os.environ[DATABASE_URL_ENV] = normalize_database_url(test_url)
     try:
         cfg = Config(str(REPO_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
@@ -185,16 +186,22 @@ def clear_registry_tables(session: Session) -> None:
         Authority,
         DiscoveryFrontier,
         Document,
+        DocumentChunk,
+        DocumentChunkEmbedding,
         DocumentContentComparison,
         DocumentExtraction,
         DocumentJurisdiction,
         DocumentVersion,
+        EmbeddingModel,
         Jurisdiction,
         Source,
     )
 
     assert_connected_to_test_database(session)
     for model in (
+        DocumentChunkEmbedding,
+        DocumentChunk,
+        EmbeddingModel,
         DiscoveryFrontier,
         DocumentContentComparison,
         DocumentExtraction,

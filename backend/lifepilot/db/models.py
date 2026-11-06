@@ -34,6 +34,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import ARRAY, CHAR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,6 +71,18 @@ FRONTIER_STATUSES = (
     "out_of_scope",
 )
 FRONTIER_FAILURE_CLASSES = ("transient", "permanent")
+
+# Planned default embedding model for Phase 8C (384-d). Future models with a
+# different dimension require a new embeddings table/column — see EmbeddingModel.
+PLANNED_EMBEDDING_MODEL_ID = "intfloat/multilingual-e5-small"
+PLANNED_EMBEDDING_DIMENSIONS = 384
+RAG_REQUIREMENT_CATEGORIES = (
+    "eligibility",
+    "required_documents",
+    "application_process",
+    "financial_or_sponsorship",
+    "official_provenance",
+)
 
 
 class Jurisdiction(Base):
@@ -536,3 +549,186 @@ class DocumentJurisdiction(Base):
 
     document: Mapped[Document] = relationship(back_populates="jurisdiction_links")
     jurisdiction: Mapped[Jurisdiction] = relationship(back_populates="document_links")
+
+
+class EmbeddingModel(Base):
+    """Registry of embedding models allowed for chunk vectors.
+
+    The Phase 8B/8C embeddings table stores ``vector(384)`` for
+    ``intfloat/multilingual-e5-small``. A future model with a different
+    dimension must not reuse that column; add a new typed embeddings table
+    (or column) and register the model here with matching ``dimensions``.
+    """
+
+    __tablename__ = "embedding_models"
+    __table_args__ = (
+        CheckConstraint("dimensions > 0", name="ck_embedding_models_dimensions"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    distance_metric: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'cosine'")
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    embeddings: Mapped[list["DocumentChunkEmbedding"]] = relationship(
+        back_populates="embedding_model"
+    )
+
+
+class DocumentChunk(Base):
+    """Evidence-aware text chunk prepared for future RAG indexing.
+
+    Jurisdiction is mandatory and must come from authoritative source metadata
+    (``sources.jurisdiction_id`` / ``jurisdictions.code``), not from empty
+    ``document_jurisdictions`` rows or semantic similarity.
+
+    ``pathway_id`` / ``requirement_category`` are optional curated associations
+    only — never inferred from embeddings.
+    """
+
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        CheckConstraint(
+            "chunk_index >= 0",
+            name="ck_document_chunks_chunk_index",
+        ),
+        CheckConstraint(
+            "length(trim(content_text)) > 0",
+            name="ck_document_chunks_content_nonempty",
+        ),
+        CheckConstraint(
+            "char_start IS NULL OR char_start >= 0",
+            name="ck_document_chunks_char_start",
+        ),
+        CheckConstraint(
+            "char_end IS NULL OR char_start IS NULL OR char_end >= char_start",
+            name="ck_document_chunks_char_range",
+        ),
+        CheckConstraint(
+            "requirement_category IS NULL OR requirement_category IN ("
+            + ", ".join(f"'{c}'" for c in RAG_REQUIREMENT_CATEGORIES)
+            + ")",
+            name="ck_document_chunks_requirement_category",
+        ),
+        CheckConstraint(
+            "pathway_id IS NULL OR pathway_id ~ '^[a-z][a-z0-9_]*$'",
+            name="ck_document_chunks_pathway_id",
+        ),
+        CheckConstraint(
+            "length(trim(jurisdiction_code)) > 0",
+            name="ck_document_chunks_jurisdiction_code_nonempty",
+        ),
+        UniqueConstraint(
+            "document_version_id",
+            "chunk_index",
+            name="uq_document_chunks_version_index",
+        ),
+        # content_sha256 is indexed but not unique: identical passages may
+        # legitimately appear more than once within one document version.
+        Index("ix_document_chunks_document_id", "document_id"),
+        Index("ix_document_chunks_document_version_id", "document_version_id"),
+        Index("ix_document_chunks_source_id", "source_id"),
+        Index("ix_document_chunks_jurisdiction_id", "jurisdiction_id"),
+        Index(
+            "ix_document_chunks_jurisdiction_current",
+            "jurisdiction_code",
+            "is_current_version",
+        ),
+        Index("ix_document_chunks_pathway_id", "pathway_id"),
+        Index("ix_document_chunks_content_sha256", "content_sha256"),
+        Index(
+            "ix_document_chunks_retrievable",
+            "jurisdiction_code",
+            postgresql_where=text("is_current_version IS TRUE"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    document_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("documents.id"), nullable=False
+    )
+    document_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=False
+    )
+    source_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sources.id"), nullable=False
+    )
+    jurisdiction_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jurisdictions.id"), nullable=False
+    )
+    # Denormalized from jurisdictions.code for mandatory filter speed.
+    # Must match jurisdiction_id; enforced by trigger in migration.
+    jurisdiction_code: Mapped[str] = mapped_column(Text, nullable=False)
+    pathway_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requirement_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    heading_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    char_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    char_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_text: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    # Snapshot of document_versions.is_current at index time; retrieval must
+    # default to is_current_version IS TRUE (or join live version rows).
+    is_current_version: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    document: Mapped[Document] = relationship()
+    document_version: Mapped[DocumentVersion] = relationship()
+    source: Mapped[Source] = relationship()
+    jurisdiction: Mapped[Jurisdiction] = relationship()
+    embeddings: Mapped[list["DocumentChunkEmbedding"]] = relationship(
+        back_populates="chunk", cascade="all, delete-orphan"
+    )
+
+
+class DocumentChunkEmbedding(Base):
+    """384-dimensional embedding for a document chunk.
+
+    Bound to ``embedding_models`` with ``dimensions = 384``. Changing to a
+    non-384 model requires a new table/column — do not silently reuse this
+    vector column for a different dimensionality.
+    """
+
+    __tablename__ = "document_chunk_embeddings"
+    __table_args__ = (
+        UniqueConstraint(
+            "chunk_id",
+            "embedding_model_id",
+            name="uq_document_chunk_embeddings_chunk_model",
+        ),
+        Index("ix_document_chunk_embeddings_model_id", "embedding_model_id"),
+        Index("ix_document_chunk_embeddings_indexed_at", "indexed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("document_chunks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    embedding_model_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("embedding_models.id"), nullable=False
+    )
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(PLANNED_EMBEDDING_DIMENSIONS), nullable=False
+    )
+    indexed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    chunk: Mapped[DocumentChunk] = relationship(back_populates="embeddings")
+    embedding_model: Mapped[EmbeddingModel] = relationship(back_populates="embeddings")

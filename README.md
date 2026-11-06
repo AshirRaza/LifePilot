@@ -22,6 +22,7 @@ Implemented stack (no FastAPI app, no frontend, no RAG yet):
 |---|---|
 | Python 3.11+ | Application and CLI tooling |
 | PostgreSQL 17 + Docker Compose | Durable registry, documents, versions, frontier |
+| pgvector | Enabled for future RAG embeddings (`vector` extension) |
 | SQLAlchemy 2.x + Alembic | Models and migrations |
 | Official source registry | Seed import, HTTPS allowlists, explicit approval |
 | Exact-URL authorization | Fetches stay inside approved patterns; redirects do not widen allowlists |
@@ -115,10 +116,10 @@ POSTGRES_USER=lifepilot
 POSTGRES_PASSWORD=your_password_here
 POSTGRES_PORT=5432
 
-DATABASE_URL=postgresql+psycopg://lifepilot:your_password_here@localhost:5432/lifepilot
+DATABASE_URL=postgresql+psycopg://lifepilot:your_password_here@127.0.0.1:5432/lifepilot
 ```
 
-If the password contains special characters (e.g. `!`, `@`, `#`), URL-encode them in `DATABASE_URL` (e.g. `!` → `%21`).
+If the password contains special characters (e.g. `!`, `@`, `#`), URL-encode them in `DATABASE_URL` (e.g. `!` → `%21`). Prefer `127.0.0.1` over `localhost` on Windows (IPv6/`::1` resolution can delay or hang connections to Docker Postgres).
 
 ### 2. Virtual environment and dependencies
 
@@ -293,7 +294,10 @@ pytest -v
 |---|---|
 | Knowledge-base foundation, ingestion, provenance, evidence quality | Implemented |
 | External public-API knowledge connectors | Implemented (EU Immigration Portal gated) |
-| Internal RAG with embeddings and pgvector | Planned |
+| RAG database foundation (pgvector + chunk schema) | Implemented |
+| Document cleaning and chunking | Implemented (`document_chunks` populated) |
+| Local chunk embeddings (pgvector) | Implemented |
+| Semantic retrieval / RAG answers | Planned |
 | AI agent combining internal and external evidence | Planned |
 | FastAPI backend | Planned |
 | Frontend and MVP | Planned |
@@ -327,6 +331,8 @@ pytest -v
 | `python scripts/query_external_knowledge.py --status` | List external providers |
 | `python scripts/query_external_knowledge.py --pathway-id gb_student` | Query external guidance |
 | `python scripts/run_external_live_smoke.py` | Live read-only provider smoke |
+| `python scripts/run_chunk_documents.py` | Chunk current extractions into `document_chunks` |
+| `python scripts/run_embed_chunks.py` | Embed current chunks into `document_chunk_embeddings` |
 | `pytest -v` | Full test suite |
 
 ### Inspect tables

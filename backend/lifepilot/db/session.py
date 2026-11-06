@@ -5,12 +5,14 @@ from dotenv import load_dotenv
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from lifepilot.db.url import normalize_database_url
+
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
     """Create a SQLAlchemy engine from DATABASE_URL in the environment."""
     load_dotenv()
-    database_url = os.environ["DATABASE_URL"]
+    database_url = normalize_database_url(os.environ["DATABASE_URL"])
     return create_engine(
         database_url,
         pool_pre_ping=True,
