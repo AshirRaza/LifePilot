@@ -1,4 +1,4 @@
-"""Read-only immigration knowledge coverage audit (Phase 6E)."""
+"""Read-only immigration knowledge coverage audit."""
 
 from lifepilot.coverage.schema import CoverageClass, PathwayStatus, Severity
 

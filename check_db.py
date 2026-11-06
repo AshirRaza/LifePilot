@@ -13,10 +13,15 @@ from lifepilot.db.url import normalize_database_url  # noqa: E402
 load_dotenv()
 
 database_url = normalize_database_url(os.environ["DATABASE_URL"])
-engine = create_engine(database_url, connect_args={"connect_timeout": 10})
+engine = create_engine(
+    database_url,
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": 10},
+)
 
-with engine.connect() as connection:
-    result = connection.execute(text("SELECT 1"))
-    print("PostgreSQL connection successful:", result.scalar_one())
-
-engine.dispose()
+try:
+    with engine.connect() as connection:
+        result = connection.execute(text("SELECT 1"))
+        print("PostgreSQL connection successful:", result.scalar_one())
+finally:
+    engine.dispose()

@@ -2,7 +2,7 @@
 
 LifePilot is an AI-powered personal administration platform intended to act as an intelligent case manager for complex life transitions—starting with international relocation, immigration administration, and employment onboarding.
 
-Today the repository is a **knowledge-base foundation**: curated official government sources are authorized, fetched, versioned, extracted, and assessed for immigration-pathway coverage. Read-only connectors can also query selected public government APIs. The goal is **evidence-backed immigration information** grounded in official documents—not chatbot answers.
+Today the repository is a **knowledge-base foundation**: curated official government sources are authorized, fetched, versioned, extracted, assessed for immigration-pathway coverage, chunked, and embedded locally for future retrieval. Read-only connectors can also query selected public government APIs. The goal is **evidence-backed immigration information** grounded in official documents—not chatbot answers.
 
 | Evidence class | Meaning |
 |---|---|
@@ -10,27 +10,26 @@ Today the repository is a **knowledge-base foundation**: curated official govern
 | Provisional readiness | Automated quality gate: all critical cells COMPLETE with passage/doc quality checks |
 | Human-verified readiness | Explicit human review only (`confirm-pathway`); **never** auto-granted |
 | External API results | Always `unverified_external`; never auto-promoted into verified pathway evidence |
-| Future AI guidance | Planned; not present in this codebase |
+| Future AI guidance | Planned; retrieval/answers not implemented yet |
 
 Provisional readiness is **not** legal advice, human verification, or permission to rely on the corpus without checking current official requirements.
 
 ## Current architecture
 
-Implemented stack (no FastAPI app, no frontend, no RAG yet):
-
 | Component | Role |
 |---|---|
 | Python 3.11+ | Application and CLI tooling |
 | PostgreSQL 17 + Docker Compose | Durable registry, documents, versions, frontier |
-| pgvector | Enabled for future RAG embeddings (`vector` extension) |
+| pgvector 0.8.2 | Local chunk embeddings (`vector(384)`) |
 | SQLAlchemy 2.x + Alembic | Models and migrations |
 | Official source registry | Seed import, HTTPS allowlists, explicit approval |
 | Exact-URL authorization | Fetches stay inside approved patterns; redirects do not widen allowlists |
 | Document ingestion & versioning | HTML/PDF/DOCX fetch, immutable raw bytes, structured extraction, content comparison |
 | Evidence extraction & validation | Critical-requirement assessments, contamination/wrong-pathway rejection |
 | Pathway coverage & readiness | 102 pathways × 5 requirements; provisional vs human-verified readiness |
+| Local RAG prep | Cleaning/chunking + `intfloat/multilingual-e5-small` embeddings (no retrieval yet) |
 | External knowledge connectors | Read-only public APIs (GOV.UK, Canada Open, data.europa.eu, CELLAR, Federal Register; EU Immigration Portal gated) |
-| Automated tests | pytest suite covering schema, registry, crawl, extract, coverage, external |
+| Automated tests | pytest suite covering schema, registry, crawl, extract, coverage, RAG, external |
 
 ### Directory structure
 
@@ -51,13 +50,7 @@ LifePilot/
 │   ├── extract/                 # HTML/PDF/DOCX extraction + comparison
 │   ├── ingest/                  # Bounded unified ingestion orchestration
 │   ├── coverage/                # Pathway inventory, evidence, corpus reliability
-│   │   ├── normalization/
-│   │   ├── evidence_validation/
-│   │   ├── evidence_remediation/
-│   │   ├── source_gap_closure/
-│   │   ├── pathway_inventory/
-│   │   ├── source_expansion/
-│   │   └── corpus_reliability/  # Backup, audit, readiness, human review CLI
+│   ├── rag/                     # Clean, chunk, local embed (no retrieval)
 │   └── external/                # External API connectors + router
 ├── scripts/                     # Operational CLIs (see below)
 ├── tests/
@@ -67,7 +60,7 @@ LifePilot/
 
 ## Current project status
 
-Corpus snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage_matrix.csv` and the live Postgres corpus. Test counts below are from the current suite (**2026-11-05**).
+Corpus snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage_matrix.csv` and the live Postgres corpus. RAG embedding counts verified **2026-11-06**. Test counts from the current suite (**2026-11-06**).
 
 | Metric | Value |
 |---|---:|
@@ -84,7 +77,9 @@ Corpus snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage
 | NOT_APPLICABLE cells | 3 |
 | Provisionally ready pathways | 7 |
 | Human-verified pathways | 0 |
-| Automated tests | 408 passed, 3 skipped |
+| Current document chunks | 3682 |
+| Chunk embeddings (E5-small / 384-d) | 3682 |
+| Automated tests | 434 passed, 3 skipped |
 
 Provisionally ready pathways (quality-gated, automated only):
 
@@ -138,6 +133,8 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+Embedding generation downloads `intfloat/multilingual-e5-small` into the local Hugging Face cache (`~/.cache/huggingface/hub`). No paid embedding APIs are used.
 
 ### 3. Start PostgreSQL
 
@@ -205,9 +202,10 @@ Supporting CLIs (also dry-run unless `--persist` / `--execute`):
 | `scripts/fetch_seeds.py` | Seed HTML fetch |
 | `scripts/discover_links.py` | Bounded HTML link discovery |
 | `scripts/discover_documents.py` | PDF/DOCX discovery/download |
-| `scripts/extract_documents.py` | Structured extraction |
+| `scripts/extract_documents.py` | Structured HTML/PDF/DOCX extraction |
 | `scripts/compare_documents.py` | Meaningful content comparison |
 | `scripts/set_source_patterns.py` | Explicit allowlist change (`--confirm-expand` to widen) |
+| `scripts/mark_document_discovery_status.py` | Manually set `documents.discovery_status` |
 
 Coverage pipeline (inventory → validation → remediation → expansion):
 
@@ -222,7 +220,19 @@ python scripts/run_pathway_inventory.py
 python scripts/run_source_expansion.py
 ```
 
-### 7. Corpus reliability CLI
+### 7. Chunking and local embeddings
+
+Idempotent. Does not change evidence classifications or source approvals.
+
+```powershell
+$env:PYTHONPATH = "backend"
+python scripts/run_chunk_documents.py
+python scripts/run_embed_chunks.py
+```
+
+Optional: `--force` to rewrite; `--cuda` for GPU when available (CPU is default).
+
+### 8. Corpus reliability CLI
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -241,7 +251,7 @@ python scripts/run_corpus_reliability.py review --pathway-id PATH --requirement 
 python scripts/run_corpus_reliability.py confirm-pathway --pathway-id PATH --reviewer YOU
 ```
 
-### 8. External knowledge retrieval
+### 9. External knowledge retrieval
 
 Read-only public API discovery. Does **not** ingest documents, widen allowlists, or change coverage readiness. Results are always `unverified_external`.
 
@@ -260,7 +270,7 @@ $env:LIFEPILOT_LIVE_EXTERNAL = "1"
 pytest tests/test_external_knowledge.py::test_live_govuk_smoke -q
 ```
 
-### 9. Run tests
+### 10. Run tests
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -275,6 +285,7 @@ pytest -v
 - **Contamination controls:** Blocklists and applicability checks prevent off-purpose forms or foreign-jurisdiction pages from completing a cell.
 - **Readiness:** `pathway_is_provisionally_ready` is automated and quality-gated. Human-verified readiness requires an explicit `confirm-pathway` decision. **0 pathways are human-verified.**
 - **External APIs:** Successful HTTP responses are not verified pathway evidence and do not change COMPLETE/PARTIAL/MISSING classifications.
+- **RAG prep:** Chunking/embedding never reclassify evidence or approve sources. Embeddings are local only.
 - **Operational caution:** Always verify current official government requirements before relying on any immigration guidance derived from this corpus.
 
 ## External connectors
@@ -297,7 +308,7 @@ pytest -v
 | RAG database foundation (pgvector + chunk schema) | Implemented |
 | Document cleaning and chunking | Implemented (`document_chunks` populated) |
 | Local chunk embeddings (pgvector) | Implemented |
-| Semantic retrieval / RAG answers | Planned |
+| Semantic retrieval / RAG answers | Planned (Phase 8E) |
 | AI agent combining internal and external evidence | Planned |
 | FastAPI backend | Planned |
 | Frontend and MVP | Planned |
@@ -315,6 +326,9 @@ pytest -v
 | `document_content_comparisons` | Meaningful content diffs between versions |
 | `document_jurisdictions` | Explicit applicability (never inferred from hierarchy alone) |
 | `discovery_frontier` | Resumable bounded crawl frontier |
+| `embedding_models` | Embedding model registry (dimensions, notes) |
+| `document_chunks` | Current-version text chunks with mandatory jurisdiction |
+| `document_chunk_embeddings` | 384-d vectors linked to chunk + model |
 
 ## Useful commands
 
@@ -329,10 +343,8 @@ pytest -v
 | `python scripts/run_ingestion.py --source-id N --execute` | Bounded execute |
 | `python scripts/run_corpus_reliability.py status` | Coverage / readiness summary |
 | `python scripts/query_external_knowledge.py --status` | List external providers |
-| `python scripts/query_external_knowledge.py --pathway-id gb_student` | Query external guidance |
-| `python scripts/run_external_live_smoke.py` | Live read-only provider smoke |
-| `python scripts/run_chunk_documents.py` | Chunk current extractions into `document_chunks` |
-| `python scripts/run_embed_chunks.py` | Embed current chunks into `document_chunk_embeddings` |
+| `python scripts/run_chunk_documents.py` | Chunk current extractions |
+| `python scripts/run_embed_chunks.py` | Embed current chunks locally |
 | `pytest -v` | Full test suite |
 
 ### Inspect tables
@@ -344,12 +356,15 @@ docker compose exec -T postgres psql -U lifepilot -d lifepilot
 ```sql
 \dt
 SELECT id, name, seed_url, review_status FROM sources ORDER BY id;
+SELECT COUNT(*) FROM document_chunks WHERE is_current_version;
+SELECT COUNT(*) FROM document_chunk_embeddings;
 ```
 
 ## Storage persistence
 
 - **Raw document bytes** live under `data/raw/` (gitignored).
 - **Postgres** uses the Docker named volume `postgres_data`.
+- **Embeddings / HF model cache** are local only (DB + `~/.cache/huggingface/hub`).
 - Backups must include **both** the database dump and the `data/` tree (`scripts/run_corpus_reliability.py backup`).
 
 Do not wipe historical raw/extraction/comparison versions unless explicitly intended. Do not treat a government URL alone as proof of a complete immigration requirement.
