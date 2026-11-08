@@ -24,7 +24,9 @@ from lifepilot.rag.retrieval import (
     InternalKnowledgeRetriever,
     InternalQuery,
     RetrievalStatus,
+    diversify_by_document,
     reciprocal_rank_fusion,
+    select_document_aware_passages,
 )
 
 
@@ -128,6 +130,93 @@ def test_rrf_deterministic_and_dedupes():
     a = reciprocal_rank_fusion([[1, 2], [2, 1]], k=60)
     b = reciprocal_rank_fusion([[1, 2], [2, 1]], k=60)
     assert a == b
+
+
+def test_rrf_ignores_empty_keyword_list():
+    semantic = [10, 20, 30]
+    fused = reciprocal_rank_fusion([semantic, []], k=60)
+    assert [cid for cid, _ in fused] == semantic
+
+
+def test_rrf_weights_prefer_semantic():
+    semantic = [1, 2, 3]
+    keyword = [99, 98, 97]
+    unweighted = dict(reciprocal_rank_fusion([semantic, keyword], k=60))
+    weighted = dict(
+        reciprocal_rank_fusion([semantic, keyword], k=60, weights=[2.0, 1.0])
+    )
+    # Semantic weight increases the relative score of semantic rank-1 vs
+    # keyword-only rank-1.
+    assert weighted[1] / weighted[99] > unweighted[1] / unweighted[99]
+    assert weighted[1] > weighted[99]
+
+
+def test_diversify_by_document_prefers_distinct_docs():
+    ranked = [11, 12, 21, 13, 31, 22]
+    mapping = {11: 1, 12: 1, 13: 1, 21: 2, 22: 2, 31: 3}
+    out = diversify_by_document(
+        ranked, mapping, top_k=3, max_chunks_per_document=1
+    )
+    assert out == [11, 21, 31]
+    # Extra slots fill with additional chunks from earlier docs.
+    out2 = diversify_by_document(
+        ranked, mapping, top_k=5, max_chunks_per_document=1
+    )
+    assert out2[:3] == [11, 21, 31]
+    assert set(out2[3:]) <= {12, 13, 22}
+
+
+def test_select_document_aware_passages_diversity_then_within_doc():
+    document_ranks = [10, 20]
+    per_doc = {
+        10: [(101, 0.95), (102, 0.90), (103, 0.80)],
+        20: [(201, 0.88), (202, 0.70)],
+    }
+    meta = {
+        101: (0, "Eligibility"),
+        102: (1, "Eligibility > Criteria"),
+        103: (5, "Fees"),
+        201: (0, "Overview"),
+        202: (1, "Overview > Details"),
+    }
+    out = select_document_aware_passages(
+        document_ranks,
+        per_doc,
+        meta,
+        top_k=4,
+        max_chunks_per_document=2,
+        expand_adjacent=False,
+    )
+    # Depth-0 across boost docs first, then round-robin deeper passages.
+    assert out[0] == 101
+    assert out[1] == 201
+    assert out[2] == 102
+    assert out[3] == 202
+
+
+def test_select_document_aware_expands_adjacent_same_section():
+    document_ranks = [10]
+    per_doc = {
+        10: [(101, 0.95), (102, 0.93), (103, 0.50)],
+    }
+    meta = {
+        101: (0, "Money you need"),
+        102: (1, "Money you need > Financial requirement"),
+        103: (8, "Other"),
+    }
+    out = select_document_aware_passages(
+        document_ranks,
+        per_doc,
+        meta,
+        top_k=3,
+        max_chunks_per_document=1,
+        expand_adjacent=True,
+        adjacent_score_floor=0.92,
+    )
+    # Primary pick 101, adjacent 102 shares section and clears score floor.
+    assert out[0] == 101
+    assert 102 in out
+    assert 103 not in out
 
 
 def test_chunker_respects_e5_safe_max_chars():
@@ -270,3 +359,245 @@ def test_empty_results(db_session: Session):
     )
     assert result.status == RetrievalStatus.NO_RESULTS
     assert result.passages == []
+
+
+def test_hybrid_empty_keyword_falls_back_to_semantic(db_session: Session):
+    """NL-style failure guard: empty FTS must not demote semantic gold."""
+    gold = _seed_chunk(
+        db_session,
+        code="NL",
+        text_value=(
+            "Highly skilled migrant residence permit requirements for a "
+            "recognised sponsor employer applying via the IND Business Portal."
+        ),
+        url_suffix="nl-hsm-gold",
+    )
+    distractor = _seed_chunk(
+        db_session,
+        code="NL",
+        text_value="General residence permit overview for families and students.",
+        url_suffix="nl-other",
+    )
+    fake = FakeEmbedder()
+    _embed_chunk(db_session, gold, fake)
+    _embed_chunk(db_session, distractor, fake)
+
+    retriever = InternalKnowledgeRetriever(db_session, embedder=fake)
+    retriever._semantic_search = (  # type: ignore[method-assign]
+        lambda query, jurisdiction, limit: [(gold.id, 0.91), (distractor.id, 0.40)]
+    )
+    retriever._keyword_search = (  # type: ignore[method-assign]
+        lambda query, jurisdiction, limit: []
+    )
+    hybrid = retriever.retrieve(
+        InternalQuery(
+            query="HSM IND recognised sponsor criteria",
+            jurisdiction="NL",
+            mode="hybrid",
+            top_k=5,
+            diversify_documents=False,
+            document_aware_passages=False,
+        )
+    )
+    assert hybrid.status == RetrievalStatus.OK
+    assert [p.chunk_id for p in hybrid.passages][:2] == [gold.id, distractor.id]
+
+
+def test_hybrid_filters_weak_keyword_only_noise(db_session: Session):
+    gold = _seed_chunk(
+        db_session,
+        code="NL",
+        text_value="Highly skilled migrant recognised sponsor IND salary criteria.",
+        url_suffix="nl-gold2",
+    )
+    weak_a = _seed_chunk(
+        db_session,
+        code="NL",
+        text_value="Unrelated tourist visa leaflet mentioning residence vaguely.",
+        url_suffix="nl-weak-a",
+    )
+    weak_b = _seed_chunk(
+        db_session,
+        code="NL",
+        text_value="Another weak keyword-only brochure about moving abroad.",
+        url_suffix="nl-weak-b",
+    )
+    fake = FakeEmbedder()
+    for chunk in (gold, weak_a, weak_b):
+        _embed_chunk(db_session, chunk, fake)
+
+    retriever = InternalKnowledgeRetriever(db_session, embedder=fake)
+    # Many weak keyword-only hits that would otherwise flood unweighted RRF.
+    weak_ids = [weak_a.id, weak_b.id] + [weak_a.id + 1000 + i for i in range(20)]
+    retriever._semantic_search = (  # type: ignore[method-assign]
+        lambda query, jurisdiction, limit: [(gold.id, 0.93)]
+    )
+    retriever._keyword_search = (  # type: ignore[method-assign]
+        lambda query, jurisdiction, limit: [
+            (cid, 0.02) for cid in weak_ids
+        ]
+    )
+    # Filter unit: weak keyword-only ids are dropped when far below best score
+    # and absent from semantic pool. Here best_kw==0.02 so floor keeps them;
+    # force a strong keyword hit on an unrelated id then weak-only noise.
+    retriever._keyword_search = (  # type: ignore[method-assign]
+        lambda query, jurisdiction, limit: (
+            [(weak_a.id, 1.0)]
+            + [(cid, 0.05) for cid in weak_ids[1:]]
+        )
+    )
+    filtered = retriever._filter_weak_keyword_ids(
+        semantic_ids=[gold.id],
+        keyword_hits=[(weak_a.id, 1.0), (weak_b.id, 0.05)],
+    )
+    assert filtered == [weak_a.id]
+
+    hybrid = retriever.retrieve(
+        InternalQuery(
+            query="Highly skilled migrant recognised sponsor",
+            jurisdiction="NL",
+            mode="hybrid",
+            top_k=5,
+            diversify_documents=False,
+            document_aware_passages=False,
+        )
+    )
+    assert hybrid.status == RetrievalStatus.OK
+    assert any(p.chunk_id == gold.id for p in hybrid.passages)
+
+
+def test_document_diversification_limits_duplicates(db_session: Session):
+    jur_code = "GB"
+    base = _seed_chunk(
+        db_session,
+        code=jur_code,
+        text_value="Skilled Worker visa eligibility licensed sponsor requirement one.",
+        url_suffix="sw-a",
+    )
+    extras: list[DocumentChunk] = []
+    for i, text_value in enumerate(
+        [
+            "Skilled Worker visa eligibility licensed sponsor requirement two.",
+            "Skilled Worker visa eligibility licensed sponsor requirement three.",
+        ],
+        start=1,
+    ):
+        chunk = DocumentChunk(
+            document_id=base.document_id,
+            document_version_id=base.document_version_id,
+            source_id=base.source_id,
+            jurisdiction_id=base.jurisdiction_id,
+            jurisdiction_code=jur_code,
+            chunk_index=i,
+            content_text=text_value,
+            content_sha256=_sha(text_value),
+            is_current_version=True,
+            heading_path=f"Eligibility/{i}",
+        )
+        db_session.add(chunk)
+        db_session.flush()
+        extras.append(chunk)
+
+    other = _seed_chunk(
+        db_session,
+        code=jur_code,
+        text_value="Skilled Worker visa salary threshold Certificate of Sponsorship.",
+        url_suffix="sw-b",
+    )
+    third = _seed_chunk(
+        db_session,
+        code=jur_code,
+        text_value="Skilled Worker visa English language requirement guidance.",
+        url_suffix="sw-c",
+    )
+    fake = FakeEmbedder()
+    for chunk in [base, *extras, other, third]:
+        _embed_chunk(db_session, chunk, fake)
+
+    retriever = InternalKnowledgeRetriever(db_session, embedder=fake)
+    # Same-doc chunks ranked first — diversification must surface other docs.
+    retriever._semantic_search = (  # type: ignore[method-assign]
+        lambda query, jurisdiction, limit: [
+            (base.id, 0.99),
+            (extras[0].id, 0.98),
+            (extras[1].id, 0.97),
+            (other.id, 0.90),
+            (third.id, 0.85),
+        ]
+    )
+    result = retriever.retrieve(
+        InternalQuery(
+            query="Skilled Worker visa eligibility licensed sponsor",
+            jurisdiction="GB",
+            mode="semantic",
+            top_k=3,
+            diversify_documents=True,
+            max_chunks_per_document=1,
+            document_aware_passages=False,
+        )
+    )
+    assert result.status == RetrievalStatus.OK
+    doc_ids = [p.document_id for p in result.passages]
+    assert len(doc_ids) == 3
+    assert len(set(doc_ids)) == 3
+    assert doc_ids[0] == base.document_id
+
+
+def test_document_aware_selects_stronger_within_doc_chunk(db_session: Session):
+    """Within-doc reselection should prefer the stronger passage in a hit doc."""
+    overview = _seed_chunk(
+        db_session,
+        code="CA",
+        text_value=(
+            "Federal Skilled Worker Program The Federal Skilled Worker Program "
+            "is for skilled workers who have foreign work experience."
+        ),
+        url_suffix="fsw",
+        heading="Federal Skilled Worker Program",
+    )
+    weaker = DocumentChunk(
+        document_id=overview.document_id,
+        document_version_id=overview.document_version_id,
+        source_id=overview.source_id,
+        jurisdiction_id=overview.jurisdiction_id,
+        jurisdiction_code="CA",
+        chunk_index=1,
+        content_text="Selection factors points table unrelated boilerplate filler.",
+        content_sha256=_sha("selection-factors"),
+        is_current_version=True,
+        heading_path="Federal Skilled Worker Program > Selection factors",
+    )
+    db_session.add(weaker)
+    db_session.flush()
+    fake = FakeEmbedder()
+    _embed_chunk(db_session, overview, fake)
+    _embed_chunk(db_session, weaker, fake)
+
+    retriever = InternalKnowledgeRetriever(db_session, embedder=fake)
+    # Global pool ranks the weaker chunk first; within-doc stub prefers overview.
+    retriever._semantic_search = (  # type: ignore[method-assign]
+        lambda query, jurisdiction, limit: [
+            (weaker.id, 0.99),
+            (overview.id, 0.80),
+        ]
+    )
+    retriever._semantic_search_in_document = (  # type: ignore[method-assign]
+        lambda jurisdiction, document_id, limit, query_vec_literal: [
+            (overview.id, 0.95),
+            (weaker.id, 0.80),
+        ]
+    )
+    result = retriever.retrieve(
+        InternalQuery(
+            query="Federal Skilled Worker Program overview",
+            jurisdiction="CA",
+            mode="semantic",
+            top_k=2,
+            diversify_documents=True,
+            document_aware_passages=True,
+            max_chunks_per_document=2,
+            expand_adjacent_chunks=False,
+        )
+    )
+    assert result.status == RetrievalStatus.OK
+    assert result.passages[0].chunk_id == overview.id

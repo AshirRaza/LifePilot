@@ -16,7 +16,9 @@ from lifepilot.rag.retrieval import (
     RetrievedPassage,
     RetrievalResult,
     RetrievalStatus,
+    diversify_by_document,
     reciprocal_rank_fusion,
+    select_document_aware_passages,
 )
 
 __all__ = [
@@ -34,7 +36,9 @@ __all__ = [
     "RetrievalResult",
     "RetrievalStatus",
     "chunk_structured_document",
+    "diversify_by_document",
     "reciprocal_rank_fusion",
     "run_chunking",
     "run_embedding",
+    "select_document_aware_passages",
 ]
