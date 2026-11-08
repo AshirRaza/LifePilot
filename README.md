@@ -27,7 +27,7 @@ Provisional readiness is **not** legal advice, human verification, or permission
 | Document ingestion & versioning | HTML/PDF/DOCX fetch, immutable raw bytes, structured extraction, content comparison |
 | Evidence extraction & validation | Critical-requirement assessments, contamination/wrong-pathway rejection |
 | Pathway coverage & readiness | 102 pathways × 5 requirements; provisional vs human-verified readiness |
-| Local RAG prep | Cleaning/chunking + `intfloat/multilingual-e5-small` embeddings (no retrieval yet) |
+| Local RAG prep | Cleaning/chunking + E5 embeddings + jurisdiction-scoped hybrid retrieval (no answers) |
 | External knowledge connectors | Read-only public APIs (GOV.UK, Canada Open, data.europa.eu, CELLAR, Federal Register; EU Immigration Portal gated) |
 | Automated tests | pytest suite covering schema, registry, crawl, extract, coverage, RAG, external |
 
@@ -77,9 +77,9 @@ Corpus snapshot dated **2026-11-04** (UTC), verified against `data/runs/coverage
 | NOT_APPLICABLE cells | 3 |
 | Provisionally ready pathways | 7 |
 | Human-verified pathways | 0 |
-| Current document chunks | 3682 |
-| Chunk embeddings (E5-small / 384-d) | 3682 |
-| Automated tests | 434 passed, 3 skipped |
+| Current document chunks | 9883 |
+| Chunk embeddings (E5-small / 384-d) | 9883 |
+| Automated tests | 441 passed, 3 skipped |
 
 Provisionally ready pathways (quality-gated, automated only):
 
@@ -232,6 +232,14 @@ python scripts/run_embed_chunks.py
 
 Optional: `--force` to rewrite; `--cuda` for GPU when available (CPU is default).
 
+Internal retrieval (jurisdiction required; results are `unverified_retrieval`, not pathway evidence):
+
+```powershell
+python scripts/query_internal_knowledge.py --query "Skilled Worker visa salary requirements" --jurisdiction GB --mode hybrid
+```
+
+Modes: `semantic`, `keyword`, `hybrid`. Pathway filters are refused until curated chunk associations exist.
+
 ### 8. Corpus reliability CLI
 
 ```powershell
@@ -308,7 +316,8 @@ pytest -v
 | RAG database foundation (pgvector + chunk schema) | Implemented |
 | Document cleaning and chunking | Implemented (`document_chunks` populated) |
 | Local chunk embeddings (pgvector) | Implemented |
-| Semantic retrieval / RAG answers | Planned (Phase 8E) |
+| Internal hybrid retrieval (semantic + keyword) | Implemented |
+| RAG answer generation / agents | Planned |
 | AI agent combining internal and external evidence | Planned |
 | FastAPI backend | Planned |
 | Frontend and MVP | Planned |
@@ -345,6 +354,7 @@ pytest -v
 | `python scripts/query_external_knowledge.py --status` | List external providers |
 | `python scripts/run_chunk_documents.py` | Chunk current extractions |
 | `python scripts/run_embed_chunks.py` | Embed current chunks locally |
+| `python scripts/query_internal_knowledge.py --query "…" --jurisdiction GB` | Hybrid internal retrieval |
 | `pytest -v` | Full test suite |
 
 ### Inspect tables

@@ -10,12 +10,19 @@ from typing import Any
 from lifepilot.extract.schema import normalize_text
 from lifepilot.rag.clean import block_plain_text, filter_blocks
 
-# Approximate English token sizing without a tokenizer dependency.
-_CHARS_PER_TOKEN = 4
-DEFAULT_TARGET_TOKENS = 400
-DEFAULT_MAX_TOKENS = 550
+# Approximate token sizing without a tokenizer dependency.
+# Use a conservative chars/token ratio so multilingual text stays under the
+# E5 512-token limit (prefix + special tokens). Dense scripts can approach
+# ~1.7 chars/token; 800 chars leaves headroom under 512.
+_CHARS_PER_TOKEN = 3
+DEFAULT_TARGET_TOKENS = 280
+DEFAULT_MAX_TOKENS = 380
 DEFAULT_MIN_CHARS = 120
-DEFAULT_OVERLAP_CHARS = 160
+DEFAULT_OVERLAP_CHARS = 120
+# Hard ceiling after packing — keeps passage embeddings within E5 max length.
+# Dense multilingual scripts can approach ~1.5 chars/token; 720 leaves headroom
+# under 512 including the passage: prefix and special tokens.
+E5_SAFE_MAX_CHARS = 720
 
 
 @dataclass(frozen=True)
@@ -155,7 +162,10 @@ def chunk_units(
             # Merge tiny remainder into previous chunk when possible.
             prev = drafts[-1]
             merged = f"{prev.content_text}\n\n{content}".strip()
-            if _estimate_tokens(merged) <= max_tokens + 50:
+            if (
+                len(merged) <= E5_SAFE_MAX_CHARS
+                and _estimate_tokens(merged) <= max_tokens + 50
+            ):
                 drafts[-1] = ChunkDraft(
                     chunk_index=prev.chunk_index,
                     content_text=merged,
@@ -227,14 +237,27 @@ def chunk_units(
             if len(d.content_text) < min_chars and kept:
                 merged = f"{kept[-1].content_text}\n\n{d.content_text}".strip()
                 prev = kept[-1]
-                kept[-1] = ChunkDraft(
-                    chunk_index=prev.chunk_index,
-                    content_text=merged,
-                    content_sha256=_sha256_text(merged),
-                    heading_path=prev.heading_path,
-                    char_start=prev.char_start,
-                    char_end=(prev.char_start or 0) + len(merged),
-                )
+                # Do not re-create oversize chunks when merging tiny remainders.
+                if len(merged) > E5_SAFE_MAX_CHARS:
+                    kept.append(
+                        ChunkDraft(
+                            chunk_index=len(kept),
+                            content_text=d.content_text,
+                            content_sha256=d.content_sha256,
+                            heading_path=d.heading_path,
+                            char_start=d.char_start,
+                            char_end=d.char_end,
+                        )
+                    )
+                else:
+                    kept[-1] = ChunkDraft(
+                        chunk_index=prev.chunk_index,
+                        content_text=merged,
+                        content_sha256=_sha256_text(merged),
+                        heading_path=prev.heading_path,
+                        char_start=prev.char_start,
+                        char_end=(prev.char_start or 0) + len(merged),
+                    )
             else:
                 kept.append(
                     ChunkDraft(
@@ -260,7 +283,51 @@ def chunk_units(
             for i, d in enumerate(drafts)
         ]
 
-    return drafts
+    # Final hard split so no draft exceeds the E5-safe character ceiling.
+    return _enforce_max_chars(
+        drafts, max_chars=E5_SAFE_MAX_CHARS, overlap_chars=overlap_chars
+    )
+
+
+def _enforce_max_chars(
+    drafts: list[ChunkDraft],
+    *,
+    max_chars: int,
+    overlap_chars: int,
+) -> list[ChunkDraft]:
+    """Split any draft whose text exceeds ``max_chars`` on soft boundaries."""
+    out: list[ChunkDraft] = []
+    for draft in drafts:
+        if len(draft.content_text) <= max_chars:
+            out.append(draft)
+            continue
+        pieces = _split_long_text(
+            draft.content_text, max_chars=max_chars, overlap_chars=overlap_chars
+        )
+        offset = draft.char_start or 0
+        for piece in pieces:
+            out.append(
+                ChunkDraft(
+                    chunk_index=len(out),
+                    content_text=piece,
+                    content_sha256=_sha256_text(piece),
+                    heading_path=draft.heading_path,
+                    char_start=offset,
+                    char_end=offset + len(piece),
+                )
+            )
+            offset += len(piece)
+    return [
+        ChunkDraft(
+            chunk_index=i,
+            content_text=d.content_text,
+            content_sha256=d.content_sha256,
+            heading_path=d.heading_path,
+            char_start=d.char_start,
+            char_end=d.char_end,
+        )
+        for i, d in enumerate(out)
+    ]
 
 
 def chunk_structured_document(

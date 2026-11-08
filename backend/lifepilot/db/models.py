@@ -675,6 +675,7 @@ class DocumentChunk(Base):
     content_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     # Snapshot of document_versions.is_current at index time; retrieval must
     # default to is_current_version IS TRUE (or join live version rows).
+    # Full-text column search_tsv is DB-generated (see migration 20261107_0009).
     is_current_version: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

@@ -1,4 +1,4 @@
-"""RAG preparation: cleaning, chunking, and local embeddings (no retrieval)."""
+"""RAG preparation and internal retrieval (no answer generation)."""
 
 from lifepilot.rag.chunker import ChunkDraft, chunk_structured_document
 from lifepilot.rag.embed_pipeline import EmbedRunStats, run_embedding
@@ -10,6 +10,14 @@ from lifepilot.rag.embedder import (
     FakeEmbedder,
 )
 from lifepilot.rag.pipeline import ChunkRunStats, run_chunking
+from lifepilot.rag.retrieval import (
+    InternalKnowledgeRetriever,
+    InternalQuery,
+    RetrievedPassage,
+    RetrievalResult,
+    RetrievalStatus,
+    reciprocal_rank_fusion,
+)
 
 __all__ = [
     "ChunkDraft",
@@ -20,7 +28,13 @@ __all__ = [
     "EmbedRunStats",
     "EmbedderConfig",
     "FakeEmbedder",
+    "InternalKnowledgeRetriever",
+    "InternalQuery",
+    "RetrievedPassage",
+    "RetrievalResult",
+    "RetrievalStatus",
     "chunk_structured_document",
+    "reciprocal_rank_fusion",
     "run_chunking",
     "run_embedding",
 ]
