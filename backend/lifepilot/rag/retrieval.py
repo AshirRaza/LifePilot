@@ -16,7 +16,7 @@ from lifepilot.db.models import (
     Document,
     DocumentChunk,
 )
-from lifepilot.rag.embedder import E5Embedder, Embedder, EmbedderConfig, resolve_device
+from lifepilot.rag.embedder import Embedder
 
 logger = logging.getLogger(__name__)
 
@@ -366,8 +366,11 @@ class InternalKnowledgeRetriever:
         if embedder is not None:
             self.embedder = embedder
         else:
-            device = resolve_device(prefer_cuda)
-            self.embedder = E5Embedder(EmbedderConfig(device=device))
+            # Reuse process-wide weights; constructing E5Embedder per request
+            # reloads the model from disk and adds multi-second latency.
+            from lifepilot.rag.embedder import get_shared_embedder
+
+            self.embedder = get_shared_embedder(prefer_cuda=prefer_cuda)
         # Semantic weight > keyword so weak lexical hits cannot freely displace
         # strong semantic matches under hybrid RRF (Phase 8F NL HSM failure).
         self.hybrid_semantic_weight = 2.0

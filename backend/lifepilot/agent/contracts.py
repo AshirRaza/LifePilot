@@ -1,4 +1,4 @@
-"""Typed agent request/response contracts (Phase 9A)."""
+"""Typed agent request/response contracts."""
 
 from __future__ import annotations
 
@@ -100,6 +100,9 @@ class TimingMetadata(BaseModel):
     validate_ms: float | None = None
     evidence_ms: float | None = None
     answer_ms: float | None = None
+    internal_retrieval_ms: float | None = None
+    external_retrieval_ms: float | None = None
+    normalize_ms: float | None = None
 
 
 class AgentResponse(BaseModel):

@@ -8,6 +8,9 @@ from lifepilot.rag.embedder import (
     EmbedderConfig,
     E5Embedder,
     FakeEmbedder,
+    get_shared_embedder,
+    reset_shared_embedder,
+    set_shared_embedder,
 )
 from lifepilot.rag.pipeline import ChunkRunStats, run_chunking
 from lifepilot.rag.retrieval import (
@@ -37,8 +40,11 @@ __all__ = [
     "RetrievalStatus",
     "chunk_structured_document",
     "diversify_by_document",
+    "get_shared_embedder",
     "reciprocal_rank_fusion",
+    "reset_shared_embedder",
     "run_chunking",
     "run_embedding",
     "select_document_aware_passages",
+    "set_shared_embedder",
 ]

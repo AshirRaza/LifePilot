@@ -1,4 +1,4 @@
-"""LLM provider boundary — interface only in Phase 9A (no network calls)."""
+"""LLM provider boundary — disabled by default (no network calls yet)."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ class LLMProvider(Protocol):
 
 
 class DisabledLLMProvider:
-    """Default provider: refuses calls so Phase 9A never hits the network."""
+    """Default provider: refuses calls until a live provider is intentionally enabled."""
 
     def __init__(
         self,
@@ -74,9 +74,8 @@ class DisabledLLMProvider:
 def get_llm_provider(config: AgentConfig | None = None) -> LLMProvider:
     """Resolve the configured provider.
 
-    Phase 9A always returns ``DisabledLLMProvider``. When provider/model env
-    vars are set they are recorded for later phases but still do not authorize
-    live calls in this phase.
+    Always returns ``DisabledLLMProvider`` today. When provider/model env vars
+    are set they are recorded for later use but do not authorize live calls yet.
     """
     cfg = config or get_agent_config()
     return DisabledLLMProvider(

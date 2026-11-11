@@ -1,4 +1,4 @@
-"""Deterministic agent runner for Phase 9A (no network / LLM calls)."""
+"""Deterministic agent runner for evidence orchestration (no LLM)."""
 
 from __future__ import annotations
 
@@ -57,6 +57,9 @@ def _response_from_state(
             validate_ms=state.get("validate_ms"),
             evidence_ms=state.get("evidence_ms"),
             answer_ms=state.get("answer_ms"),
+            internal_retrieval_ms=state.get("internal_retrieval_ms"),
+            external_retrieval_ms=state.get("external_retrieval_ms"),
+            normalize_ms=state.get("normalize_ms"),
         ),
         jurisdiction=state.get("jurisdiction") or request.jurisdiction,
         pathway_id=state.get("pathway_id") or request.pathway_id,
@@ -69,9 +72,10 @@ def run_agent(
     *,
     config: AgentConfig | None = None,
 ) -> AgentResponse:
-    """Execute the Phase 9A foundation graph for a single request.
+    """Execute the agent graph for a single request.
 
     Each call builds a fresh state dict — requests cannot share mutable state.
+    No LLM API key is required for evidence orchestration.
     """
     started = time.perf_counter()
     cfg = config or get_agent_config()

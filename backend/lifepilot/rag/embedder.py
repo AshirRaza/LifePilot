@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 
@@ -110,6 +111,8 @@ class E5Embedder:
         self.config = config or EmbedderConfig(device=resolve_device(False))
         self._tokenizer = None
         self._model = None
+        # Serialize load + forward so a process-shared instance is thread-safe.
+        self._infer_lock = threading.Lock()
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
@@ -151,43 +154,76 @@ class E5Embedder:
     def _embed(self, prefixed_texts: Sequence[str]) -> EmbeddingBatchResult:
         import torch
 
-        self._ensure_loaded()
-        assert self._tokenizer is not None and self._model is not None
+        with self._infer_lock:
+            self._ensure_loaded()
+            assert self._tokenizer is not None and self._model is not None
 
-        encoded = self._tokenizer(
-            list(prefixed_texts),
-            padding=True,
-            truncation=True,
-            max_length=self.config.max_length,
-            return_tensors="pt",
-        )
-        truncated: list[bool] = []
-        token_counts: list[int] = []
-        # Count tokens without triggering the HF "sequence longer than max" warning.
-        prev_max = getattr(self._tokenizer, "model_max_length", self.config.max_length)
-        self._tokenizer.model_max_length = int(1e9)
-        try:
-            for text in prefixed_texts:
-                ids = self._tokenizer.encode(text, add_special_tokens=True)
-                n = len(ids)
-                token_counts.append(min(n, self.config.max_length))
-                truncated.append(n > self.config.max_length)
-        finally:
-            self._tokenizer.model_max_length = prev_max
+            encoded = self._tokenizer(
+                list(prefixed_texts),
+                padding=True,
+                truncation=True,
+                max_length=self.config.max_length,
+                return_tensors="pt",
+            )
+            truncated: list[bool] = []
+            token_counts: list[int] = []
+            # Count tokens without triggering the HF "sequence longer than max" warning.
+            prev_max = getattr(
+                self._tokenizer, "model_max_length", self.config.max_length
+            )
+            self._tokenizer.model_max_length = int(1e9)
+            try:
+                for text in prefixed_texts:
+                    ids = self._tokenizer.encode(text, add_special_tokens=True)
+                    n = len(ids)
+                    token_counts.append(min(n, self.config.max_length))
+                    truncated.append(n > self.config.max_length)
+            finally:
+                self._tokenizer.model_max_length = prev_max
 
-        input_ids = encoded["input_ids"].to(self.config.device)
-        attention_mask = encoded["attention_mask"].to(self.config.device)
-        with torch.no_grad():
-            outputs = self._model(input_ids=input_ids, attention_mask=attention_mask)
-            pooled = mean_pool(outputs.last_hidden_state, attention_mask)
-            pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
-        vectors = pooled.detach().cpu().numpy().astype(np.float32)
-        validate_vectors(vectors, dimensions=self.config.dimensions)
-        return EmbeddingBatchResult(
-            vectors=vectors,
-            truncated=truncated,
-            token_counts=token_counts,
-        )
+            input_ids = encoded["input_ids"].to(self.config.device)
+            attention_mask = encoded["attention_mask"].to(self.config.device)
+            with torch.no_grad():
+                outputs = self._model(
+                    input_ids=input_ids, attention_mask=attention_mask
+                )
+                pooled = mean_pool(outputs.last_hidden_state, attention_mask)
+                pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
+            vectors = pooled.detach().cpu().numpy().astype(np.float32)
+            validate_vectors(vectors, dimensions=self.config.dimensions)
+            return EmbeddingBatchResult(
+                vectors=vectors,
+                truncated=truncated,
+                token_counts=token_counts,
+            )
+
+
+_shared_embedder: Embedder | None = None
+_shared_embedder_lock = threading.Lock()
+
+
+def get_shared_embedder(*, prefer_cuda: bool = False) -> Embedder:
+    """Process-wide embedder (lazy). Avoids reloading E5 weights per request."""
+    global _shared_embedder
+    if _shared_embedder is not None:
+        return _shared_embedder
+    with _shared_embedder_lock:
+        if _shared_embedder is None:
+            device = resolve_device(prefer_cuda)
+            _shared_embedder = E5Embedder(EmbedderConfig(device=device))
+        return _shared_embedder
+
+
+def set_shared_embedder(embedder: Embedder | None) -> None:
+    """Replace the process-wide embedder (tests / explicit warm-up)."""
+    global _shared_embedder
+    with _shared_embedder_lock:
+        _shared_embedder = embedder
+
+
+def reset_shared_embedder() -> None:
+    """Drop the process-wide embedder (tests only)."""
+    set_shared_embedder(None)
 
 
 class FakeEmbedder:

@@ -1,8 +1,8 @@
-"""LifePilot immigration agent foundation (Phase 9A).
+"""LifePilot immigration agent.
 
 Provides typed contracts, evidence models, execution limits, an LLM provider
-boundary, and a minimal LangGraph workflow. Live evidence orchestration and
-answer generation are deferred.
+boundary, and a LangGraph workflow that orchestrates internal hybrid RAG plus
+optional external knowledge connectors. Answer generation remains deferred.
 """
 
 from lifepilot.agent.config import AgentConfig, get_agent_config
@@ -34,6 +34,15 @@ from lifepilot.agent.graph import (
     build_agent_graph,
     get_compiled_agent_graph,
 )
+from lifepilot.agent.orchestration import (
+    EvidenceOrchestrator,
+    OrchestrationResult,
+    explicit_providers_for_jurisdiction,
+    get_evidence_orchestrator,
+    reset_default_evidence_orchestrator,
+    reset_evidence_orchestrator_override,
+    set_evidence_orchestrator_override,
+)
 from lifepilot.agent.providers import (
     DisabledLLMProvider,
     LLMMessage,
@@ -57,6 +66,7 @@ __all__ = [
     "CHECKPOINTING_BOUNDARY_NOTE",
     "DisabledLLMProvider",
     "EvidenceItem",
+    "EvidenceOrchestrator",
     "EvidenceSourceType",
     "EvidenceVerificationState",
     "GRAPH_NODE_ORDER",
@@ -64,15 +74,21 @@ __all__ = [
     "LLMNotConfiguredError",
     "LLMProvider",
     "LLMResult",
+    "OrchestrationResult",
     "RetrievalOptions",
     "TimingMetadata",
     "build_agent_graph",
     "build_evidence_id",
     "evidence_from_external_item",
     "evidence_from_internal_passage",
+    "explicit_providers_for_jurisdiction",
     "get_agent_config",
     "get_compiled_agent_graph",
+    "get_evidence_orchestrator",
     "get_llm_provider",
+    "reset_default_evidence_orchestrator",
+    "reset_evidence_orchestrator_override",
     "run_agent",
+    "set_evidence_orchestrator_override",
     "validate_agent_request",
 ]

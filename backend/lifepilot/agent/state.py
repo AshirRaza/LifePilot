@@ -48,9 +48,13 @@ class AgentGraphState(TypedDict):
     evidence_ms: float
     answer_ms: float
     total_ms: float
+    internal_retrieval_ms: NotRequired[float]
+    external_retrieval_ms: NotRequired[float]
+    normalize_ms: NotRequired[float]
 
     # Extension bookkeeping.
     deferred_stages: NotRequired[list[str]]
+    external_provider_outcomes: NotRequired[list[dict[str, Any]]]
 
 
 def initial_state_from_request(
@@ -93,7 +97,7 @@ def initial_state_from_request(
     )
 
 
-# Future checkpointing boundary (Phase 9+):
+# Future checkpointing boundary:
 # - Prefer a PostgreSQL-backed LangGraph checkpointer scoped by
 #   (authenticated_user_id, conversation_id).
 # - Do not enable checkpointers in unit tests.

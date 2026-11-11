@@ -1,4 +1,4 @@
-"""Phase 9A agent foundation tests — no network or API keys required."""
+"""Agent contract, graph foundation, and LLM-boundary tests (offline)."""
 
 from __future__ import annotations
 
@@ -29,16 +29,33 @@ from lifepilot.agent import (
 from lifepilot.agent.config import reset_agent_config_cache
 from lifepilot.agent.errors import AgentValidationError
 from lifepilot.agent.graph import reset_compiled_agent_graph
+from lifepilot.agent.orchestration import (
+    OrchestrationResult,
+    set_evidence_orchestrator_override,
+)
 from lifepilot.agent.state import CHECKPOINTING_BOUNDARY_NOTE, initial_state_from_request
 
 
+class _OfflineEvidenceStub:
+    """Keep contract tests offline (no DB / network)."""
+
+    def gather(self, **_kwargs) -> OrchestrationResult:
+        return OrchestrationResult(
+            evidence=[],
+            status=AgentStatus.INSUFFICIENT_EVIDENCE,
+            missing_information=["retrieved_evidence"],
+            warnings=[
+                "Retrieved evidence does not establish complete visa eligibility or "
+                "COMPLETE pathway coverage.",
+            ],
+            internal_status="stub",
+        )
+
+
 @pytest.fixture(autouse=True)
-def _reset_agent_caches():
-    reset_agent_config_cache()
-    reset_compiled_agent_graph()
+def _reset_agent_caches(reset_agent_runtime):
+    set_evidence_orchestrator_override(_OfflineEvidenceStub())  # type: ignore[arg-type]
     yield
-    reset_agent_config_cache()
-    reset_compiled_agent_graph()
 
 
 def test_request_requires_jurisdiction_and_question():
@@ -180,34 +197,33 @@ def test_graph_compiles_and_runs_deterministically():
     )
     out1 = graph.invoke(state)
     out2 = graph.invoke(state)
-    assert out1["status"] == AgentStatus.SUCCESS.value
-    assert out2["status"] == AgentStatus.SUCCESS.value
+    assert out1["status"] == AgentStatus.INSUFFICIENT_EVIDENCE.value
+    assert out2["status"] == AgentStatus.INSUFFICIENT_EVIDENCE.value
     assert out1["step_count"] == out2["step_count"] == len(GRAPH_NODE_ORDER)
     assert out1["answer"] is None
     assert out1["evidence"] == []
-    assert "evidence_orchestration" in out1["deferred_stages"]
     assert "answer_generation" in out1["deferred_stages"]
     assert any("pathway_id is a user-provided hint" in w for w in out1["warnings"])
 
 
-def test_run_agent_invalid_and_success_statuses():
+def test_run_agent_invalid_and_insufficient_statuses():
     bad = run_agent({"question": "hello", "jurisdiction": ""})
     assert bad.status == AgentStatus.INVALID_REQUEST
     assert bad.errors
 
-    ok = run_agent(
+    empty = run_agent(
         AgentRequest(
             question="Student visa financial requirement?",
             jurisdiction="GB",
             conversation_id="conv_iso_1",
         )
     )
-    assert ok.status == AgentStatus.SUCCESS
-    assert ok.answer is None
-    assert ok.evidence == []
-    assert "retrieved_evidence" in ok.missing_information
-    assert ok.jurisdiction == "GB"
-    assert ok.timing.total_ms >= 0
+    assert empty.status == AgentStatus.INSUFFICIENT_EVIDENCE
+    assert empty.answer is None
+    assert empty.evidence == []
+    assert "retrieved_evidence" in empty.missing_information
+    assert empty.jurisdiction == "GB"
+    assert empty.timing.total_ms >= 0
 
 
 def test_state_isolation_between_requests():

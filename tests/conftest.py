@@ -107,3 +107,27 @@ def db_session(test_database_url: str) -> Session:
         if transaction.is_active:
             transaction.rollback()
         connection.close()
+
+
+@pytest.fixture
+def reset_agent_runtime():
+    """Reset agent config/graph/orchestrator/embedder caches around a test."""
+    from lifepilot.agent.config import reset_agent_config_cache
+    from lifepilot.agent.graph import reset_compiled_agent_graph
+    from lifepilot.agent.orchestration import (
+        reset_default_evidence_orchestrator,
+        reset_evidence_orchestrator_override,
+    )
+    from lifepilot.rag.embedder import reset_shared_embedder
+
+    reset_agent_config_cache()
+    reset_compiled_agent_graph()
+    reset_evidence_orchestrator_override()
+    reset_default_evidence_orchestrator()
+    reset_shared_embedder()
+    yield
+    reset_evidence_orchestrator_override()
+    reset_default_evidence_orchestrator()
+    reset_shared_embedder()
+    reset_agent_config_cache()
+    reset_compiled_agent_graph()

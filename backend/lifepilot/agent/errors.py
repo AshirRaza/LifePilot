@@ -1,4 +1,4 @@
-"""Agent error types (Phase 9A)."""
+"""Agent error types."""
 
 from __future__ import annotations
 
@@ -39,8 +39,9 @@ class LLMNotConfiguredError(AgentError):
     def __init__(
         self,
         message: str = (
-            "LLM provider is not configured. Phase 9A does not invoke models; "
-            "set LIFEPILOT_LLM_PROVIDER and LIFEPILOT_LLM_MODEL before Phase 9C."
+            "LLM provider is not configured. Answer generation is deferred; "
+            "set LIFEPILOT_LLM_PROVIDER and LIFEPILOT_LLM_MODEL before enabling "
+            "model calls."
         ),
         *,
         code: str = "llm_not_configured",
