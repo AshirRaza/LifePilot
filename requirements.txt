@@ -12,3 +12,6 @@ python-docx>=1.1
 numpy>=1.26
 torch>=2.2,<3
 transformers>=4.40,<5
+# Phase 9A agent foundation (contracts + LangGraph workflow skeleton).
+pydantic>=2.7.4,<3
+langgraph>=1.2.0,<1.3

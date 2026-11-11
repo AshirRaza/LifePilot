@@ -44,6 +44,9 @@ tmp/
 temp/
 .scratch/
 scripts/_tmp_*.py
+embed_run_*.json
+embed_run_*.txt
+pytest_*_out.txt
 
 # OS
 .DS_Store
