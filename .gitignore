@@ -44,9 +44,12 @@ tmp/
 temp/
 .scratch/
 scripts/_tmp_*.py
+scripts/_tmp_*/
 embed_run_*.json
 embed_run_*.txt
 pytest_*_out.txt
+*_latency_probe*.json
+.coverage.*
 
 # OS
 .DS_Store

@@ -8,9 +8,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from lifepilot.agent.answer import AnswerClaim
 from lifepilot.agent.config import AgentConfig, get_agent_config
 from lifepilot.agent.errors import AgentValidationError
 from lifepilot.agent.evidence import EvidenceItem, RetrievalModeOption
+from lifepilot.agent.providers import LLMUsage
 
 
 class AgentStatus(str, Enum):
@@ -103,6 +105,39 @@ class TimingMetadata(BaseModel):
     internal_retrieval_ms: float | None = None
     external_retrieval_ms: float | None = None
     normalize_ms: float | None = None
+    llm_ms: float | None = None
+    grounding_ms: float | None = None
+
+
+class UsageMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    estimated_cost_usd: float | None = None
+    provider: str | None = None
+    model: str | None = None
+
+    @classmethod
+    def from_llm_usage(
+        cls,
+        usage: LLMUsage | None,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        estimated_cost_usd: float | None = None,
+    ) -> UsageMetadata | None:
+        if usage is None and not provider and not model:
+            return None
+        return cls(
+            input_tokens=None if usage is None else usage.input_tokens,
+            output_tokens=None if usage is None else usage.output_tokens,
+            total_tokens=None if usage is None else usage.total_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            provider=provider,
+            model=model,
+        )
 
 
 class AgentResponse(BaseModel):
@@ -112,10 +147,12 @@ class AgentResponse(BaseModel):
     status: AgentStatus
     evidence: list[EvidenceItem] = Field(default_factory=list)
     answer: str | None = None
+    claims: list[AnswerClaim] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     timing: TimingMetadata = Field(default_factory=TimingMetadata)
+    usage: UsageMetadata | None = None
     jurisdiction: str | None = None
     pathway_id: str | None = None
     conversation_id: str | None = None

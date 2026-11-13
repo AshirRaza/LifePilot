@@ -170,7 +170,14 @@ def test_evidence_ids_are_stable():
     assert a != c
 
 
-def test_llm_provider_disabled_without_keys():
+def test_llm_provider_disabled_without_keys(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LIFEPILOT_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LIFEPILOT_LLM_MODEL", raising=False)
+    reset_agent_config_cache()
+    from lifepilot.agent.providers import reset_llm_provider_cache
+
+    reset_llm_provider_cache()
     provider = get_llm_provider()
     assert isinstance(provider, DisabledLLMProvider)
     with pytest.raises(LLMNotConfiguredError):
@@ -199,10 +206,10 @@ def test_graph_compiles_and_runs_deterministically():
     out2 = graph.invoke(state)
     assert out1["status"] == AgentStatus.INSUFFICIENT_EVIDENCE.value
     assert out2["status"] == AgentStatus.INSUFFICIENT_EVIDENCE.value
-    assert out1["step_count"] == out2["step_count"] == len(GRAPH_NODE_ORDER)
+    # Conditional routing skips the LLM node when evidence is insufficient.
+    assert out1["step_count"] == out2["step_count"] == 3
     assert out1["answer"] is None
     assert out1["evidence"] == []
-    assert "answer_generation" in out1["deferred_stages"]
     assert any("pathway_id is a user-provided hint" in w for w in out1["warnings"])
 
 

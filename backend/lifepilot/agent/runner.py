@@ -1,4 +1,4 @@
-"""Deterministic agent runner for evidence orchestration (no LLM)."""
+"""Deterministic agent runner for evidence orchestration and grounded answers."""
 
 from __future__ import annotations
 
@@ -8,12 +8,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from lifepilot.agent.answer import AnswerClaim
 from lifepilot.agent.config import AgentConfig, get_agent_config
 from lifepilot.agent.contracts import (
     AgentRequest,
     AgentResponse,
     AgentStatus,
     TimingMetadata,
+    UsageMetadata,
     validate_agent_request,
 )
 from lifepilot.agent.errors import AgentError, AgentValidationError
@@ -38,17 +40,33 @@ def _response_from_state(
         elif isinstance(item, dict):
             evidence.append(EvidenceItem.model_validate(item))
 
+    claims_raw = state.get("claims") or []
+    claims: list[AnswerClaim] = []
+    for item in claims_raw:
+        if isinstance(item, AnswerClaim):
+            claims.append(item)
+        elif isinstance(item, dict):
+            claims.append(AnswerClaim.model_validate(item))
+
     status_raw = state.get("status") or AgentStatus.SUCCESS.value
     try:
         status = AgentStatus(status_raw)
     except ValueError:
         status = AgentStatus.EXECUTION_FAILURE
 
+    usage = None
+    usage_raw = state.get("usage")
+    if isinstance(usage_raw, UsageMetadata):
+        usage = usage_raw
+    elif isinstance(usage_raw, dict):
+        usage = UsageMetadata.model_validate(usage_raw)
+
     return AgentResponse(
         request_id=state.get("request_id") or request.ensure_request_id(),
         status=status,
         evidence=evidence,
         answer=state.get("answer"),
+        claims=claims,
         missing_information=list(state.get("missing_information") or []),
         warnings=list(state.get("warnings") or []),
         errors=list(state.get("errors") or []),
@@ -60,7 +78,10 @@ def _response_from_state(
             internal_retrieval_ms=state.get("internal_retrieval_ms"),
             external_retrieval_ms=state.get("external_retrieval_ms"),
             normalize_ms=state.get("normalize_ms"),
+            llm_ms=state.get("llm_ms"),
+            grounding_ms=state.get("grounding_ms"),
         ),
+        usage=usage,
         jurisdiction=state.get("jurisdiction") or request.jurisdiction,
         pathway_id=state.get("pathway_id") or request.pathway_id,
         conversation_id=state.get("conversation_id") or request.conversation_id,
@@ -75,7 +96,7 @@ def run_agent(
     """Execute the agent graph for a single request.
 
     Each call builds a fresh state dict — requests cannot share mutable state.
-    No LLM API key is required for evidence orchestration.
+    LLM calls occur only when evidence is available and Anthropic is configured.
     """
     started = time.perf_counter()
     cfg = config or get_agent_config()
@@ -112,7 +133,6 @@ def run_agent(
         )
 
     request_id = parsed.ensure_request_id()
-    # Persist generated id onto a copy for response correlation.
     if not parsed.request_id:
         parsed = parsed.model_copy(update={"request_id": request_id})
 
@@ -150,7 +170,7 @@ def run_agent(
             pathway_id=parsed.pathway_id,
             conversation_id=parsed.conversation_id,
         )
-    except Exception as exc:  # noqa: BLE001 — boundary catch for API stability
+    except Exception as exc:  # noqa: BLE001
         wall = (time.perf_counter() - started) * 1000
         logger.exception("agent.unexpected_error request_id=%s", request_id)
         return AgentResponse(

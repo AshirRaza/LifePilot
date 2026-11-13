@@ -39,9 +39,10 @@ class AgentGraphState(TypedDict):
     warnings: list[str]
     missing_information: list[str]
 
-    # Evidence vs answer (populated in later phases).
+    # Evidence vs answer.
     evidence: list[dict[str, Any]]
     answer: str | None
+    claims: NotRequired[list[dict[str, Any]]]
 
     # Timing (milliseconds).
     validate_ms: float
@@ -51,10 +52,13 @@ class AgentGraphState(TypedDict):
     internal_retrieval_ms: NotRequired[float]
     external_retrieval_ms: NotRequired[float]
     normalize_ms: NotRequired[float]
+    llm_ms: NotRequired[float]
+    grounding_ms: NotRequired[float]
 
     # Extension bookkeeping.
     deferred_stages: NotRequired[list[str]]
     external_provider_outcomes: NotRequired[list[dict[str, Any]]]
+    usage: NotRequired[dict[str, Any] | None]
 
 
 def initial_state_from_request(
@@ -89,11 +93,13 @@ def initial_state_from_request(
         missing_information=[],
         evidence=[],
         answer=None,
+        claims=[],
         validate_ms=0.0,
         evidence_ms=0.0,
         answer_ms=0.0,
         total_ms=0.0,
         deferred_stages=[],
+        usage=None,
     )
 
 

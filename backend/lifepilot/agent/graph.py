@@ -1,26 +1,25 @@
-"""LangGraph workflow: validation → evidence orchestration → answer stub → finalize.
-
-``evidence_extension_point`` gathers internal/external evidence.
-Answer generation remains deferred (no LLM).
-"""
+"""LangGraph workflow: validate → evidence → grounded answer → finalize."""
 
 from __future__ import annotations
 
 import logging
 import time
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 
 from lifepilot.agent.config import AgentConfig, get_agent_config
-from lifepilot.agent.contracts import AgentStatus
+from lifepilot.agent.contracts import AgentStatus, UsageMetadata
+from lifepilot.agent.evidence import EvidenceItem
+from lifepilot.agent.generation import generate_grounded_answer
 from lifepilot.agent.orchestration import get_evidence_orchestrator
+from lifepilot.agent.providers import get_llm_provider
 from lifepilot.agent.state import AgentGraphState
 
 logger = logging.getLogger(__name__)
 
-# Fixed graph topology — no unbounded loops or retries.
+# Fixed graph topology — no unbounded loops or tool-calling agents.
 GRAPH_NODE_ORDER = (
     "validate_initialize",
     "evidence_extension_point",
@@ -55,7 +54,6 @@ def validate_initialize(state: AgentGraphState) -> dict[str, Any]:
         errors.append("jurisdiction is required")
         status = AgentStatus.INVALID_REQUEST.value
 
-    # Pathway is a user hint only — never treat as proven applicability.
     if state.get("pathway_id"):
         warnings.append(
             "pathway_id is a user-provided hint only and does not establish "
@@ -67,10 +65,6 @@ def validate_initialize(state: AgentGraphState) -> dict[str, Any]:
             "conversation_id is an opaque correlation key and does not confer "
             "authorization or cross-request isolation by itself."
         )
-
-    warnings.append(
-        "Answer generation is deferred; this run returns evidence only."
-    )
 
     elapsed = (time.perf_counter() - started) * 1000
     logger.info(
@@ -120,7 +114,6 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
             "evidence_ms": round((time.perf_counter() - started) * 1000, 3),
         }
 
-    # Subtract time already spent in prior nodes when validate_ms is present.
     validate_ms = float(state.get("validate_ms") or 0.0)
     deadline = time.perf_counter() + max(
         0.1, float(cfg.request_timeout_seconds) - (validate_ms / 1000.0)
@@ -155,7 +148,6 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
     warnings.extend(result.warnings)
     errors.extend(result.errors)
     missing = list(result.missing_information)
-    # Do not override a more severe status already set upstream.
     status = result.status.value
 
     return {
@@ -173,44 +165,129 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
         "external_provider_outcomes": result.external_provider_outcomes,
     }
 
+
+def _should_generate_answer(state: AgentGraphState) -> bool:
+    status = state.get("status") or AgentStatus.SUCCESS.value
+    if status != AgentStatus.SUCCESS.value:
+        return False
+    if state.get("errors"):
+        return False
+    evidence = state.get("evidence") or []
+    return bool(evidence)
+
+
+def route_after_evidence(
+    state: AgentGraphState,
+) -> Literal["answer_extension_point", "finalize"]:
+    """Skip LLM when evidence is insufficient or the request already failed."""
+    if _should_generate_answer(state):
+        return "answer_extension_point"
+    return "finalize"
+
+
 def answer_extension_point(state: AgentGraphState) -> dict[str, Any]:
-    """Placeholder for future answer generation (no LLM calls)."""
+    """One Claude structured generation call + citation grounding."""
     started = time.perf_counter()
     step = _bump_step(state)
     max_steps = int(state.get("max_workflow_steps") or 16)
     errors = list(state.get("errors") or [])
     warnings = list(state.get("warnings") or [])
+    missing = list(state.get("missing_information") or [])
     deferred = list(state.get("deferred_stages") or [])
     status = state.get("status") or AgentStatus.SUCCESS.value
+    cfg = get_agent_config()
 
-    if status in {
-        AgentStatus.INVALID_REQUEST.value,
-        AgentStatus.EXECUTION_FAILURE.value,
-        AgentStatus.UNSUPPORTED_OPERATION.value,
-    }:
+    if not _should_generate_answer(state):
+        deferred.append("answer_generation")
+        warnings.append("answer_skipped:insufficient_or_failed_evidence")
         return {
             "step_count": step,
+            "status": status,
+            "warnings": warnings,
+            "deferred_stages": deferred,
+            "answer": None,
+            "claims": [],
             "answer_ms": round((time.perf_counter() - started) * 1000, 3),
         }
 
     if step > max_steps:
         errors.append("max_workflow_steps exceeded during answer_extension_point")
-        status = AgentStatus.EXECUTION_FAILURE.value
-    else:
+        return {
+            "step_count": step,
+            "status": AgentStatus.EXECUTION_FAILURE.value,
+            "errors": errors,
+            "answer_ms": round((time.perf_counter() - started) * 1000, 3),
+        }
+
+    evidence_items: list[EvidenceItem] = []
+    for raw in state.get("evidence") or []:
+        if isinstance(raw, EvidenceItem):
+            evidence_items.append(raw)
+        elif isinstance(raw, dict):
+            evidence_items.append(EvidenceItem.model_validate(raw))
+
+    # Overall deadline remaining for the LLM call.
+    spent = (
+        float(state.get("validate_ms") or 0.0)
+        + float(state.get("evidence_ms") or 0.0)
+    ) / 1000.0
+    remaining = max(1.0, float(cfg.request_timeout_seconds) - spent)
+    if remaining < 1.0:
+        return {
+            "step_count": step,
+            "status": AgentStatus.EXECUTION_FAILURE.value,
+            "errors": errors + ["request_deadline_exceeded_before_llm"],
+            "answer_ms": round((time.perf_counter() - started) * 1000, 3),
+        }
+
+    result = generate_grounded_answer(
+        question=str(state.get("question") or ""),
+        jurisdiction=str(state.get("jurisdiction") or ""),
+        pathway_id=state.get("pathway_id"),
+        user_circumstances=state.get("user_circumstances"),
+        evidence=evidence_items,
+        config=cfg,
+        provider=get_llm_provider(cfg),
+    )
+
+    warnings.extend(result.warnings)
+    errors.extend(result.errors)
+    if result.missing_information:
+        # Merge without duplicates.
+        for item in result.missing_information:
+            if item not in missing:
+                missing.append(item)
+
+    usage = UsageMetadata.from_llm_usage(
+        result.usage,
+        provider=result.provider_id,
+        model=result.model_id,
+        estimated_cost_usd=result.estimated_cost_usd,
+    )
+
+    # Preserve evidence success unless generation/grounding demotes status.
+    out_status = result.status.value
+    if (
+        out_status == AgentStatus.SUCCESS.value
+        and status == AgentStatus.SUCCESS.value
+        and result.answer is None
+        and any("llm_not_configured" in w for w in result.warnings)
+    ):
         deferred.append("answer_generation")
-        warnings.append(
-            "answer_extension_point skipped LLM generation "
-            "(no provider calls until answer generation is enabled)."
-        )
 
     return {
         "step_count": step,
-        "status": status,
+        "status": out_status,
         "errors": errors,
         "warnings": warnings,
         "deferred_stages": deferred,
-        "answer": None,
+        "missing_information": missing,
+        "answer": result.answer,
+        "claims": result.claims,
         "answer_ms": round((time.perf_counter() - started) * 1000, 3),
+        "llm_ms": result.llm_ms,
+        "grounding_ms": result.grounding_ms,
+        "usage": None if usage is None else usage.model_dump(mode="json"),
     }
 
 
@@ -223,21 +300,21 @@ def finalize(state: AgentGraphState) -> dict[str, Any]:
         + float(state.get("answer_ms") or 0.0)
     )
     status = state.get("status") or AgentStatus.SUCCESS.value
-    # Do not demote a successful evidence bundle when only soft/partial errors
-    # remain; orchestration already converts recoverable failures to warnings.
     if (
         state.get("errors")
         and status == AgentStatus.SUCCESS.value
         and not (state.get("evidence") or [])
+        and not state.get("answer")
     ):
         status = AgentStatus.EXECUTION_FAILURE.value
 
     logger.info(
-        "agent.finalize request_id=%s status=%s steps=%s evidence=%s",
+        "agent.finalize request_id=%s status=%s steps=%s evidence=%s has_answer=%s",
         state.get("request_id"),
         status,
         step,
         len(state.get("evidence") or []),
+        bool(state.get("answer")),
     )
     return {
         "step_count": step,
@@ -247,7 +324,7 @@ def finalize(state: AgentGraphState) -> dict[str, Any]:
 
 
 def build_agent_graph(config: AgentConfig | None = None) -> Any:
-    """Construct an uncompiled StateGraph with the fixed agent topology."""
+    """Construct an uncompiled StateGraph with conditional LLM routing."""
     _ = config or get_agent_config()
     graph: StateGraph = StateGraph(AgentGraphState)
     graph.add_node("validate_initialize", validate_initialize)
@@ -257,7 +334,14 @@ def build_agent_graph(config: AgentConfig | None = None) -> Any:
 
     graph.add_edge(START, "validate_initialize")
     graph.add_edge("validate_initialize", "evidence_extension_point")
-    graph.add_edge("evidence_extension_point", "answer_extension_point")
+    graph.add_conditional_edges(
+        "evidence_extension_point",
+        route_after_evidence,
+        {
+            "answer_extension_point": "answer_extension_point",
+            "finalize": "finalize",
+        },
+    )
     graph.add_edge("answer_extension_point", "finalize")
     graph.add_edge("finalize", END)
     return graph
@@ -265,7 +349,7 @@ def build_agent_graph(config: AgentConfig | None = None) -> Any:
 
 @lru_cache(maxsize=1)
 def get_compiled_agent_graph() -> Any:
-    """Compile the foundation graph without a checkpointer (no DB dependency)."""
+    """Compile the graph without a checkpointer (no DB dependency)."""
     return build_agent_graph().compile()
 
 

@@ -1,10 +1,6 @@
-"""LifePilot immigration agent.
+"""LifePilot immigration agent — evidence orchestration and grounded answers."""
 
-Provides typed contracts, evidence models, execution limits, an LLM provider
-boundary, and a LangGraph workflow that orchestrates internal hybrid RAG plus
-optional external knowledge connectors. Answer generation remains deferred.
-"""
-
+from lifepilot.agent.answer import AnswerClaim, GroundedAnswer
 from lifepilot.agent.config import AgentConfig, get_agent_config
 from lifepilot.agent.contracts import (
     AgentRequest,
@@ -12,6 +8,7 @@ from lifepilot.agent.contracts import (
     AgentStatus,
     RetrievalOptions,
     TimingMetadata,
+    UsageMetadata,
     validate_agent_request,
 )
 from lifepilot.agent.errors import (
@@ -44,16 +41,24 @@ from lifepilot.agent.orchestration import (
     set_evidence_orchestrator_override,
 )
 from lifepilot.agent.providers import (
+    DEFAULT_ANTHROPIC_MODEL,
+    AnthropicLLMProvider,
     DisabledLLMProvider,
     LLMMessage,
     LLMProvider,
     LLMResult,
+    LLMUsage,
+    StructuredLLMResult,
     get_llm_provider,
+    reset_llm_provider_cache,
+    reset_llm_provider_override,
+    set_llm_provider_override,
 )
 from lifepilot.agent.runner import run_agent
 from lifepilot.agent.state import CHECKPOINTING_BOUNDARY_NOTE, AgentGraphState
 
 __all__ = [
+    "DEFAULT_ANTHROPIC_MODEL",
     "AgentConfig",
     "AgentError",
     "AgentExecutionError",
@@ -63,6 +68,8 @@ __all__ = [
     "AgentStatus",
     "AgentUnsupportedError",
     "AgentValidationError",
+    "AnthropicLLMProvider",
+    "AnswerClaim",
     "CHECKPOINTING_BOUNDARY_NOTE",
     "DisabledLLMProvider",
     "EvidenceItem",
@@ -70,13 +77,17 @@ __all__ = [
     "EvidenceSourceType",
     "EvidenceVerificationState",
     "GRAPH_NODE_ORDER",
+    "GroundedAnswer",
     "LLMMessage",
     "LLMNotConfiguredError",
     "LLMProvider",
     "LLMResult",
+    "LLMUsage",
     "OrchestrationResult",
     "RetrievalOptions",
+    "StructuredLLMResult",
     "TimingMetadata",
+    "UsageMetadata",
     "build_agent_graph",
     "build_evidence_id",
     "evidence_from_external_item",
@@ -88,7 +99,10 @@ __all__ = [
     "get_llm_provider",
     "reset_default_evidence_orchestrator",
     "reset_evidence_orchestrator_override",
+    "reset_llm_provider_cache",
+    "reset_llm_provider_override",
     "run_agent",
     "set_evidence_orchestrator_override",
+    "set_llm_provider_override",
     "validate_agent_request",
 ]

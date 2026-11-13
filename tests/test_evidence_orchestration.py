@@ -680,6 +680,11 @@ def test_no_accidental_persistent_writes(db_session: Session):
 
 
 def test_run_agent_with_injected_orchestrator_end_to_end():
+    from lifepilot.agent.providers import (
+        DisabledLLMProvider,
+        set_llm_provider_override,
+    )
+
     class FakeOrch:
         def gather(self, **kwargs: Any) -> OrchestrationResult:
             item = evidence_from_internal_passage(
@@ -703,6 +708,8 @@ def test_run_agent_with_injected_orchestrator_end_to_end():
                 internal_status="ok",
             )
 
+    # Evidence-wiring test only — never spend Anthropic calls here.
+    set_llm_provider_override(DisabledLLMProvider())
     set_evidence_orchestrator_override(FakeOrch())  # type: ignore[arg-type]
     response = run_agent(
         AgentRequest(
