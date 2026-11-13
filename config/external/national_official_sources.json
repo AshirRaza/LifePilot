@@ -1,0 +1,101 @@
+{
+  "catalog_id": "national_official_sources_v1",
+  "notes": [
+    "Curated official pathway URLs for live external verification.",
+    "Not unrestricted search. Hosts must match provider allowlists.",
+    "Evidence remains unverified_external until KB approval."
+  ],
+  "sources": [
+    {
+      "id": "nl_hsm",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "title": "IND — Highly skilled migrant",
+      "url": "https://ind.nl/en/residence-permits/work/highly-skilled-migrant",
+      "hosts": ["ind.nl", "www.ind.nl"],
+      "keywords": ["highly skilled", "kennismigrant", "salary", "criterion"]
+    },
+    {
+      "id": "nl_work",
+      "jurisdiction": "NL",
+      "pathway_id": null,
+      "title": "IND — Work residence permits",
+      "url": "https://ind.nl/en/residence-permits/work",
+      "hosts": ["ind.nl", "www.ind.nl"],
+      "keywords": ["work permit", "residence permit", "employment"]
+    },
+    {
+      "id": "ie_csep",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "title": "DETE — Critical Skills Employment Permit",
+      "url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/critical-skills-employment-permit/",
+      "hosts": ["enterprise.gov.ie", "www.enterprise.gov.ie"],
+      "keywords": ["critical skills", "remuneration", "salary", "employment permit"]
+    },
+    {
+      "id": "ie_gep",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_general_employment_permit",
+      "title": "DETE — General Employment Permit",
+      "url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/general-employment-permit/",
+      "hosts": ["enterprise.gov.ie", "www.enterprise.gov.ie"],
+      "keywords": ["general employment", "remuneration", "labour market"]
+    },
+    {
+      "id": "ie_permits_hub",
+      "jurisdiction": "IE",
+      "pathway_id": null,
+      "title": "DETE — Employment permits hub",
+      "url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/",
+      "hosts": ["enterprise.gov.ie", "www.enterprise.gov.ie"],
+      "keywords": ["employment permit", "permit types"]
+    },
+    {
+      "id": "fr_passeport_talent",
+      "jurisdiction": "FR",
+      "pathway_id": "fr_passeport_talent",
+      "title": "Service-Public — Passeport talent / carte de séjour talent",
+      "url": "https://www.service-public.fr/particuliers/vosdroits/F16922",
+      "hosts": [
+        "www.service-public.fr",
+        "service-public.fr",
+        "www.service-public.gouv.fr",
+        "service-public.gouv.fr"
+      ],
+      "keywords": ["passeport talent", "carte talent", "talent passport", "catégorie"]
+    },
+    {
+      "id": "fr_etrangers_hub",
+      "jurisdiction": "FR",
+      "pathway_id": null,
+      "title": "Service-Public — Foreigners in France",
+      "url": "https://www.service-public.fr/particuliers/vosdroits/N110",
+      "hosts": [
+        "www.service-public.fr",
+        "service-public.fr",
+        "www.service-public.gouv.fr",
+        "service-public.gouv.fr"
+      ],
+      "keywords": ["étranger", "titre de séjour", "immigration"]
+    },
+    {
+      "id": "sg_ep",
+      "jurisdiction": "SG",
+      "pathway_id": "sg_employment_pass",
+      "title": "MOM — Employment Pass",
+      "url": "https://www.mom.gov.sg/passes-and-permits/employment-pass",
+      "hosts": ["www.mom.gov.sg", "mom.gov.sg"],
+      "keywords": ["employment pass", "salary", "eligibility", "qualifying"]
+    },
+    {
+      "id": "sg_ep_eligibility",
+      "jurisdiction": "SG",
+      "pathway_id": "sg_employment_pass",
+      "title": "MOM — Employment Pass eligibility",
+      "url": "https://www.mom.gov.sg/passes-and-permits/employment-pass/eligibility",
+      "hosts": ["www.mom.gov.sg", "mom.gov.sg"],
+      "keywords": ["eligibility", "qualifying salary", "complementarity"]
+    }
+  ]
+}

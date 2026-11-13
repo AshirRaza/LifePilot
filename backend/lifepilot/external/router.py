@@ -24,6 +24,9 @@ from lifepilot.external.providers.eu_immigration_portal import (
 from lifepilot.external.providers.eu_opendata import ALLOWED_HOSTS as EU_OD_HOSTS
 from lifepilot.external.providers.eurlex_cellar import ALLOWED_HOSTS as CELLAR_HOSTS
 from lifepilot.external.providers.govuk import ALLOWED_HOSTS as GOVUK_HOSTS
+from lifepilot.external.providers.national_official import (
+    ALLOWED_HOSTS as NATIONAL_HOSTS,
+)
 from lifepilot.external.providers.us_federal_register import (
     ALLOWED_HOSTS as FR_HOSTS,
 )
@@ -39,6 +42,7 @@ ALL_ALLOWED_HOSTS = (
     | CELLAR_HOSTS
     | FR_HOSTS
     | EIP_HOSTS
+    | NATIONAL_HOSTS
 )
 
 

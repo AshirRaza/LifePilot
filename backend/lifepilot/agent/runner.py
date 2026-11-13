@@ -85,6 +85,7 @@ def _response_from_state(
         jurisdiction=state.get("jurisdiction") or request.jurisdiction,
         pathway_id=state.get("pathway_id") or request.pathway_id,
         conversation_id=state.get("conversation_id") or request.conversation_id,
+        retrieval_decision=state.get("retrieval_decision"),
     )
 
 
@@ -146,6 +147,7 @@ def run_agent(
         retrieval_mode=parsed.retrieval.mode,
         retrieval_top_k=parsed.retrieval.top_k,
         include_external=parsed.retrieval.include_external,
+        external_mode=parsed.retrieval.external_mode,
         max_workflow_steps=cfg.max_workflow_steps,
     )
 

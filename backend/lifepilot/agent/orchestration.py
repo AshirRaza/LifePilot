@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +18,15 @@ from lifepilot.agent.evidence import (
     EvidenceItem,
     evidence_from_external_item,
     evidence_from_internal_passage,
+)
+from lifepilot.agent.retrieval_policy import (
+    ExternalMode,
+    RetrievalDecision,
+    assess_internal_freshness,
+    decide_retrieval,
+    detect_high_risk_categories,
+    reconcile_effective_dates,
+    resolve_external_mode,
 )
 from lifepilot.external.http import ExternalHttpClient, HttpClientConfig
 from lifepilot.external.mapping import PROVIDER_JURISDICTIONS, resolve_jurisdiction
@@ -71,6 +82,10 @@ PROVIDER_LIMITATION_NOTES: dict[str, str] = {
     ProviderId.EU_IMMIGRATION_PORTAL.value: (
         "EU Immigration Portal has no unrestricted API; results are limited and unapproved for ingestion."
     ),
+    ProviderId.NATIONAL_OFFICIAL.value: (
+        "National official HTML pages are curated allowlisted fetches; "
+        "unverified_external until approved through the knowledge-base workflow."
+    ),
 }
 
 MIN_SUBSTANTIVE_CHARS = 40
@@ -89,10 +104,39 @@ class OrchestrationResult:
     internal_status: str | None = None
     external_provider_outcomes: list[dict[str, Any]] = field(default_factory=list)
     profile_ms: dict[str, float] = field(default_factory=dict)
+    retrieval_decision: str | None = None
+    retrieval_decision_reasons: list[str] = field(default_factory=list)
 
 
 def _is_substantive(text: str) -> bool:
     return len((text or "").strip()) >= MIN_SUBSTANTIVE_CHARS
+
+
+_MONEY_RE = re.compile(r"(?:£|\$|€)\s?\d[\d,]*(?:\.\d+)?")
+
+
+def _numeric_conflict_warnings(evidence: list[EvidenceItem]) -> list[str]:
+    """Detect differing monetary literals across internal vs external evidence."""
+    from lifepilot.agent.evidence import EvidenceSourceType
+
+    internal_vals: set[str] = set()
+    external_vals: set[str] = set()
+    for item in evidence:
+        blob = item.passage_text or ""
+        found = {re.sub(r"[\s,]", "", m.group(0)) for m in _MONEY_RE.finditer(blob)}
+        if item.source_type == EvidenceSourceType.INTERNAL_RAG:
+            internal_vals |= found
+        elif item.source_type == EvidenceSourceType.EXTERNAL_API:
+            external_vals |= found
+    if not internal_vals or not external_vals:
+        return []
+    if internal_vals != external_vals and internal_vals.isdisjoint(external_vals):
+        return [
+            "possible_internal_external_numeric_conflict:"
+            f"internal={sorted(internal_vals)[:5]};external={sorted(external_vals)[:5]};"
+            "do_not_treat_as_settled_without_review"
+        ]
+    return []
 
 
 def _deadline_remaining(deadline: float | None) -> float | None:
@@ -108,11 +152,16 @@ def explicit_providers_for_jurisdiction(jurisdiction: str) -> list[ProviderId]:
         jur = "GB"
     if not jur:
         return []
-    return [
+    selected = [
         pid
         for pid, jurisdictions in PROVIDER_JURISDICTIONS.items()
         if jur in jurisdictions
     ]
+    # Prefer curated national pages ahead of EU open-data connectors.
+    selected.sort(
+        key=lambda p: (0 if p == ProviderId.NATIONAL_OFFICIAL else 1, p.value)
+    )
+    return selected
 
 
 class EvidenceOrchestrator:
@@ -149,7 +198,8 @@ class EvidenceOrchestrator:
         pathway_id: str | None = None,
         retrieval_mode: str = "hybrid",
         top_k: int = 8,
-        include_external: bool = False,
+        include_external: bool | None = None,
+        external_mode: str | None = None,
         request_id: str | None = None,
         deadline_monotonic: float | None = None,
     ) -> OrchestrationResult:
@@ -167,6 +217,10 @@ class EvidenceOrchestrator:
             else "hybrid"
         )
         capped_top_k = max(1, min(int(top_k), cfg.max_retrieval_top_k, cfg.max_evidence_items))
+        resolved_mode = resolve_external_mode(
+            external_mode=external_mode,
+            include_external=include_external,
+        )
         warnings: list[str] = [
             "Retrieved evidence does not establish complete visa eligibility or "
             "COMPLETE pathway coverage.",
@@ -195,9 +249,13 @@ class EvidenceOrchestrator:
         external_outcomes: list[ProviderOutcome] = []
         external_ms = 0.0
         errors: list[str] = []
+        decision_meta: list[str] = []
+        retrieval_decision = RetrievalDecision.INTERNAL_ONLY.value
 
-        # Run independent retrieval legs concurrently when both are requested.
-        if include_external:
+        connectors_available = bool(explicit_providers_for_jurisdiction(jur))
+
+        # Explicit ON: parallel internal + external for latency.
+        if resolved_mode == ExternalMode.ON:
             with ThreadPoolExecutor(max_workers=2) as pool:
                 fut_internal = pool.submit(
                     self._retrieve_internal,
@@ -233,7 +291,10 @@ class EvidenceOrchestrator:
                     logger.exception(
                         "agent.external_retrieval_error request_id=%s", request_id
                     )
+            retrieval_decision = RetrievalDecision.INTERNAL_PLUS_EXTERNAL.value
+            decision_meta = ["external_mode=on"]
         else:
+            # OFF and AUTO: internal first.
             try:
                 internal_passages, internal_status, internal_ms = self._retrieve_internal(
                     question=question,
@@ -249,10 +310,71 @@ class EvidenceOrchestrator:
                     "agent.internal_retrieval_error request_id=%s", request_id
                 )
 
+            internal_passages = [
+                p for p in internal_passages if p.jurisdiction_code == jur
+            ]
+            substantive_internal = sum(
+                1 for p in internal_passages if _is_substantive(p.content_text)
+            )
+            version_ages = self._lookup_version_retrieved_at(
+                [p.document_version_id for p in internal_passages]
+            )
+            freshness = assess_internal_freshness(
+                urls=[p.official_url for p in internal_passages],
+                version_retrieved_at=version_ages,
+                version_ids=[p.document_version_id for p in internal_passages],
+                question_categories=detect_high_risk_categories(question),
+            )
+            policy = decide_retrieval(
+                question=question,
+                jurisdiction=jur,
+                pathway_id=pathway_id,
+                external_mode=resolved_mode,
+                substantive_internal_count=substantive_internal,
+                internal_status=internal_status,
+                freshness=freshness,
+                connectors_available=connectors_available,
+            )
+            # LIFEPILOT_AGENT_EXTERNAL_FALLBACK is deprecated: under
+            # external_mode=auto, thin internal evidence already triggers
+            # connectors via decide_retrieval (no second decision pass).
+
+            retrieval_decision = policy.decision.value
+            decision_meta.extend(policy.reasons)
+            warnings.append(
+                f"retrieval_decision:{policy.decision.value}:"
+                + ",".join(policy.reasons[:6])
+            )
+
+            if policy.run_external:
+                try:
+                    external_items, external_outcomes, external_ms = self._retrieve_external(
+                        question=question,
+                        jurisdiction=jur,
+                        pathway_id=pathway_id,
+                        deadline_monotonic=deadline_monotonic,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"external_retrieval_failed:{exc.__class__.__name__}")
+                    logger.exception(
+                        "agent.external_policy_error request_id=%s", request_id
+                    )
+                    if policy.require_verification:
+                        warnings.append(
+                            "external_verification_attempted_but_failed;"
+                            "do_not_treat_internal_as_freshly_verified"
+                        )
+            elif policy.require_verification:
+                warnings.append(
+                    "external_verification_required_but_unavailable;"
+                    "high_risk_current_figures_not_confirmed"
+                )
+
         # Jurisdiction isolation for internal hits (defense in depth).
         internal_passages = [
             p for p in internal_passages if p.jurisdiction_code == jur
         ]
+        run_external = bool(external_items or external_outcomes)
 
         # Normalize
         norm_started = time.perf_counter()
@@ -325,20 +447,47 @@ class EvidenceOrchestrator:
                     + (f":{outcome.error_detail}" if outcome.error_detail else "")
                 )
 
-        if include_external and not explicit_providers_for_jurisdiction(jur):
+        external_was_attempted = (
+            resolved_mode == ExternalMode.ON
+            or run_external
+            or any(
+                w.startswith("retrieval_decision:external")
+                or "external_verification" in w
+                for w in warnings
+            )
+        )
+        if (
+            resolved_mode != ExternalMode.OFF
+            and external_was_attempted
+            and not explicit_providers_for_jurisdiction(jur)
+        ):
             warnings.append(
                 f"No mapped external providers for jurisdiction {jur}; "
                 "external retrieval skipped."
             )
 
+        # Flag possible numeric conflicts across internal vs external evidence.
+        conflict_notes = _numeric_conflict_warnings(evidence)
+        warnings.extend(conflict_notes)
+
+        # Conservative effective-date scan (never invent legal effective dates).
+        date_notes = reconcile_effective_dates(evidence)
+        warnings.extend(date_notes.warnings)
+
         status, missing = self._assess_sufficiency(
             evidence=evidence,
             internal_status=internal_status,
-            include_external=include_external,
+            include_external=external_was_attempted,
             external_outcomes=external_outcomes,
             errors=errors,
             jurisdiction=jur,
         )
+        missing.extend(date_notes.missing_information)
+        if conflict_notes:
+            missing.append("resolved_current_numerical_requirement")
+            warnings.append(
+                "numeric_conflict_unresolved:omit_or_qualify_definitive_figures"
+            )
 
         # Preserve usable evidence: demote leg failures to warnings rather than
         # flipping a successful evidence bundle into execution_failure.
@@ -348,12 +497,15 @@ class EvidenceOrchestrator:
             errors = []
 
         logger.info(
-            "agent.evidence request_id=%s jur=%s internal=%s evidence=%s status=%s",
+            "agent.evidence request_id=%s jur=%s decision=%s internal=%s "
+            "evidence=%s status=%s reasons=%s",
             request_id,
             jur,
+            retrieval_decision,
             internal_status,
             len(evidence),
             status.value,
+            decision_meta[:8],
         )
         profile = {
             "normalize_ms": round(normalize_ms, 3),
@@ -366,7 +518,7 @@ class EvidenceOrchestrator:
             status=status,
             warnings=warnings,
             errors=errors,
-            missing_information=missing,
+            missing_information=list(dict.fromkeys(missing)),
             internal_ms=round(internal_ms, 3),
             external_ms=round(external_ms, 3),
             normalize_ms=round(normalize_ms, 3),
@@ -381,6 +533,8 @@ class EvidenceOrchestrator:
                 for o in external_outcomes
             ],
             profile_ms=profile,
+            retrieval_decision=retrieval_decision,
+            retrieval_decision_reasons=list(decision_meta),
         )
 
     def _assess_sufficiency(
@@ -425,6 +579,40 @@ class EvidenceOrchestrator:
 
         missing.append("retrieved_evidence")
         return AgentStatus.INSUFFICIENT_EVIDENCE, missing
+
+    def _lookup_version_retrieved_at(
+        self, version_ids: list[int | None]
+    ) -> dict[int, datetime]:
+        """Map document_version_id → retrieved_at for freshness assessment."""
+        ids = sorted({int(v) for v in version_ids if v is not None})
+        if not ids:
+            return {}
+        try:
+            from lifepilot.db.models import DocumentVersion
+
+            factory = self._session_factory_resolved()
+            with factory() as session:
+                rows = (
+                    session.query(
+                        DocumentVersion.id,
+                        DocumentVersion.retrieved_at,
+                        DocumentVersion.last_checked_at,
+                    )
+                    .filter(DocumentVersion.id.in_(ids))
+                    .all()
+                )
+            out: dict[int, datetime] = {}
+            for vid, retrieved_at, last_checked_at in rows:
+                # Prefer last_checked_at for freshness age; never erase retrieved_at.
+                anchor = last_checked_at or retrieved_at
+                if anchor is not None:
+                    out[int(vid)] = anchor
+            return out
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "agent.version_retrieved_at_lookup_failed", exc_info=True
+            )
+            return {}
 
     def _session_factory_resolved(self) -> sessionmaker[Session]:
         if self._session_factory is not None:

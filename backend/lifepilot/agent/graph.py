@@ -127,7 +127,8 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
             pathway_id=state.get("pathway_id"),
             retrieval_mode=str(state.get("retrieval_mode") or "hybrid"),
             top_k=int(state.get("retrieval_top_k") or cfg.default_retrieval_top_k),
-            include_external=bool(state.get("include_external")),
+            include_external=state.get("include_external"),
+            external_mode=str(state.get("external_mode") or "auto"),
             request_id=state.get("request_id"),
             deadline_monotonic=deadline,
         )
@@ -163,6 +164,7 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
         "external_retrieval_ms": result.external_ms,
         "normalize_ms": result.normalize_ms,
         "external_provider_outcomes": result.external_provider_outcomes,
+        "retrieval_decision": result.retrieval_decision,
     }
 
 

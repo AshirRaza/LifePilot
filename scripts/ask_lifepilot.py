@@ -23,6 +23,8 @@ def _print_human(response) -> None:
     print(f"request_id: {response.request_id}")
     print(f"jurisdiction: {response.jurisdiction}")
     print(f"pathway_id: {response.pathway_id}")
+    if response.retrieval_decision:
+        print(f"retrieval_decision: {response.retrieval_decision}")
     print(
         "timing_ms: "
         f"total={response.timing.total_ms} "
@@ -85,7 +87,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--question", required=True)
     parser.add_argument("--jurisdiction", required=True)
     parser.add_argument("--pathway", default=None, dest="pathway_id")
-    parser.add_argument("--include-external", action="store_true")
+    parser.add_argument(
+        "--external-mode",
+        choices=("auto", "off", "on"),
+        default="auto",
+        help=(
+            "Retrieval policy: auto (default intelligent hybrid), "
+            "off (internal-only), on (always combine official connectors)."
+        ),
+    )
+    parser.add_argument(
+        "--include-external",
+        action="store_true",
+        help="Legacy alias for --external-mode on.",
+    )
+    parser.add_argument(
+        "--internal-only",
+        action="store_true",
+        help="Legacy alias for --external-mode off (reproducible evals).",
+    )
     parser.add_argument(
         "--mode",
         choices=("hybrid", "semantic", "keyword"),
@@ -100,6 +120,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    external_mode = args.external_mode
+    include_external = None
+    if args.include_external:
+        include_external = True
+        external_mode = "on"
+    elif args.internal_only:
+        include_external = False
+        external_mode = "off"
+
+    retrieval = {
+        "mode": args.mode,
+        "top_k": args.top_k,
+        "external_mode": external_mode,
+        "include_external": include_external,
+    }
+
     if args.evidence_only:
         from dataclasses import replace
 
@@ -111,11 +147,7 @@ def main(argv: list[str] | None = None) -> int:
                 question=args.question,
                 jurisdiction=args.jurisdiction,
                 pathway_id=args.pathway_id,
-                retrieval={
-                    "mode": args.mode,
-                    "top_k": args.top_k,
-                    "include_external": bool(args.include_external),
-                },
+                retrieval=retrieval,
             ),
             config=cfg,
         )
@@ -131,11 +163,7 @@ def main(argv: list[str] | None = None) -> int:
                 question=args.question,
                 jurisdiction=args.jurisdiction,
                 pathway_id=args.pathway_id,
-                retrieval={
-                    "mode": args.mode,
-                    "top_k": args.top_k,
-                    "include_external": bool(args.include_external),
-                },
+                retrieval=retrieval,
             )
         )
 

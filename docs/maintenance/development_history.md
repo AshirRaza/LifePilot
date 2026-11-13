@@ -1,28 +1,32 @@
-# LifePilot — Development history index
+# LifePilot — What to keep under `data/` and `docs/`
 
-Concise map of archived phase reports. Full text lives under
-`data/runs/archive/phase_history/` (local; `data/` is gitignored).
+`data/` is gitignored. Keep operational and eval artifacts only; do not
+accumulate narrative phase reports.
 
-| Artifact | Topic |
-|---|---|
-| `phase_7_report.md` | External knowledge connectors |
-| `phase_8a_readiness_report.md` … `phase_8h_report.md` | Coverage, corpus reliability, hybrid RAG, remediation |
-| `phase_8d1_cleanup_report.md` | Earlier cleanup pass |
-| `phase_9a_report.md` | LangGraph agent contracts / evidence graph |
-| `phase_9b_report.md` / `phase_9b1_latency_report.md` | Evidence orchestration + embedder reuse latency fix |
-| `phase_9c_report.md` | Anthropic Claude grounded answers |
-| `codebase_cleanup_report.md` | Nov 2026 pre–9C cleanup |
+## Keep
 
-## Active evaluation / audit records (not archived)
-
-| Path | Role |
+| Path | Why |
 |---|---|
 | `config/eval/agent_qa_benchmark_v1.json` | Fixed 50-question benchmark |
-| `data/runs/phase_9c1_evaluation_report.md` | Human-readable 9C.1 E2E evaluation |
-| `data/runs/phase_9c2_grounding_audit_report.md` | Grounding audit + hardening |
+| `config/eval/high_risk_legal_review_queue.json` | High-risk legal review state |
+| `config/freshness/source_freshness_policy.json` | Recheck intervals |
+| `config/external/national_official_sources.json` | NL/IE/FR/SG official URL catalog |
 | `data/runs/grounded_qa_eval/baseline_9c1/` | Immutable 9C.1 machine baseline |
-| `data/runs/grounded_qa_eval/phase_9c2_*.jsonl` | Offline audit, re-ground, paid regression |
+| `data/runs/grounded_qa_eval/phase_9c2_*.jsonl` | Grounding audit / regression inputs |
+| `data/runs/coverage_matrix.csv` | Retrieval eval / coverage gold |
+| `data/runs/evidence_matrix.csv` | Evidence inventory |
+| `data/runs/corpus_status_report.md` | Corpus readiness snapshot |
+| `data/runs/blocked_evidence_recoveries.csv` | Blocked-evidence tracking |
+| `data/runs/backup_manifest.json` | Backup inventory |
 | `data/runs/human_review_packets/` | Pathway human-review packets |
-| `data/runs/corpus_status_report.md` + matrices | Corpus / coverage operational snapshots |
+| `data/runs/review_packets/` | Material-change / E15 review packets |
 
-Phase 9C.3 / 9D were not started as part of the post–9C.2 cleanup.
+## Regenerable (delete anytime; scripts recreate)
+
+- `run_source_freshness_check.py` → `source_freshness_report.json`
+- `run_knowledge_maintenance.py` → `knowledge_maintenance_report.json`
+- `run_national_official_smoke.py` → `national_official_smoke.json`
+- `run_grounded_qa_eval.py` → eval markdown / `results.jsonl`
+- `write_grounding_audit_report.py` → grounding audit markdown
+
+Do not delete `baseline_9c1/` or rewrite historical evaluation JSONL artifacts.

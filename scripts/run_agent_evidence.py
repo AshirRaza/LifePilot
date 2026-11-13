@@ -67,9 +67,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jurisdiction", required=True)
     parser.add_argument("--pathway", default=None, dest="pathway_id")
     parser.add_argument(
+        "--external-mode",
+        choices=("auto", "off", "on"),
+        default="auto",
+        help="auto (default), off (internal-only), on (force connectors).",
+    )
+    parser.add_argument(
         "--include-external",
         action="store_true",
-        help="Also query Phase 7 external knowledge connectors.",
+        help="Legacy alias for --external-mode on.",
+    )
+    parser.add_argument(
+        "--internal-only",
+        action="store_true",
+        help="Legacy alias for --external-mode off.",
     )
     parser.add_argument(
         "--mode",
@@ -84,6 +95,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    external_mode = args.external_mode
+    include_external = None
+    if args.include_external:
+        include_external = True
+        external_mode = "on"
+    elif args.internal_only:
+        include_external = False
+        external_mode = "off"
+
     response = run_agent(
         AgentRequest(
             question=args.question,
@@ -92,7 +112,8 @@ def main(argv: list[str] | None = None) -> int:
             retrieval={
                 "mode": args.mode,
                 "top_k": args.top_k,
-                "include_external": bool(args.include_external),
+                "external_mode": external_mode,
+                "include_external": include_external,
             },
         )
     )

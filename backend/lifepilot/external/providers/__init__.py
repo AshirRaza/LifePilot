@@ -7,6 +7,7 @@ from lifepilot.external.providers.eu_immigration_portal import (
 from lifepilot.external.providers.eu_opendata import EuOpenDataConnector
 from lifepilot.external.providers.eurlex_cellar import EurlexCellarConnector
 from lifepilot.external.providers.govuk import GovukContentConnector
+from lifepilot.external.providers.national_official import NationalOfficialConnector
 from lifepilot.external.providers.us_federal_register import (
     UsFederalRegisterConnector,
 )
@@ -18,6 +19,7 @@ ALL_CONNECTOR_CLASSES = (
     EurlexCellarConnector,
     UsFederalRegisterConnector,
     EuImmigrationPortalConnector,
+    NationalOfficialConnector,
 )
 
 __all__ = [
@@ -27,5 +29,6 @@ __all__ = [
     "EuOpenDataConnector",
     "EurlexCellarConnector",
     "GovukContentConnector",
+    "NationalOfficialConnector",
     "UsFederalRegisterConnector",
 ]

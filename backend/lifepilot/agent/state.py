@@ -29,7 +29,8 @@ class AgentGraphState(TypedDict):
     user_circumstances: dict[str, Any] | None
     retrieval_mode: str
     retrieval_top_k: int
-    include_external: bool
+    include_external: bool | None
+    external_mode: str
 
     # Execution control.
     step_count: int
@@ -59,6 +60,7 @@ class AgentGraphState(TypedDict):
     deferred_stages: NotRequired[list[str]]
     external_provider_outcomes: NotRequired[list[dict[str, Any]]]
     usage: NotRequired[dict[str, Any] | None]
+    retrieval_decision: NotRequired[str | None]
 
 
 def initial_state_from_request(
@@ -71,8 +73,9 @@ def initial_state_from_request(
     conversation_id: str | None,
     retrieval_mode: str,
     retrieval_top_k: int,
-    include_external: bool,
+    include_external: bool | None,
     max_workflow_steps: int,
+    external_mode: str = "auto",
 ) -> AgentGraphState:
     """Build an isolated per-request state dict (no shared globals)."""
     return AgentGraphState(
@@ -85,6 +88,7 @@ def initial_state_from_request(
         retrieval_mode=retrieval_mode,
         retrieval_top_k=retrieval_top_k,
         include_external=include_external,
+        external_mode=external_mode,
         step_count=0,
         max_workflow_steps=max_workflow_steps,
         status="success",
@@ -100,6 +104,7 @@ def initial_state_from_request(
         total_ms=0.0,
         deferred_stages=[],
         usage=None,
+        retrieval_decision=None,
     )
 
 

@@ -253,7 +253,9 @@ def _reset_agent_state(reset_agent_runtime):
 def test_explicit_providers_no_all_provider_fallback():
     assert explicit_providers_for_jurisdiction("GB") == [ProviderId.GOVUK_CONTENT]
     assert ProviderId.CANADA_OPEN in explicit_providers_for_jurisdiction("CA")
-    assert explicit_providers_for_jurisdiction("SG") == []
+    assert explicit_providers_for_jurisdiction("SG") == [
+        ProviderId.NATIONAL_OFFICIAL
+    ]
     assert explicit_providers_for_jurisdiction("AU") == []
 
 
@@ -470,8 +472,8 @@ def test_unsupported_external_jurisdiction_skips_providers():
     )
     orch._retrieve_internal = lambda **kwargs: ([], "no_results", 0.2)  # type: ignore[method-assign]
     result = orch.gather(
-        question="Employment Pass requirements",
-        jurisdiction="SG",
+        question="Skilled migration requirements",
+        jurisdiction="AU",
         include_external=True,
     )
     assert result.external_provider_outcomes == []

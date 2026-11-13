@@ -139,6 +139,7 @@ def generate_grounded_answer(
         structured.value,  # type: ignore[arg-type]
         evidence=evidence,
         jurisdiction=jurisdiction,
+        pathway_id=pathway_id,
     )
     grounding_ms = (time.perf_counter() - g_started) * 1000
     warnings.extend(grounded.warnings)

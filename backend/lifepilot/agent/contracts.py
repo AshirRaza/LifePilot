@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lifepilot.agent.answer import AnswerClaim
 from lifepilot.agent.config import AgentConfig, get_agent_config
@@ -23,12 +23,26 @@ class AgentStatus(str, Enum):
     INVALID_REQUEST = "invalid_request"
 
 
+ExternalModeOption = Literal["auto", "off", "on"]
+
+
 class RetrievalOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: RetrievalModeOption = "hybrid"
     top_k: int = Field(default=8, ge=1, le=50)
-    include_external: bool = False
+    # Default automatic hybrid policy for the main agent.
+    external_mode: ExternalModeOption = "auto"
+    # Legacy bridge: True→on, False→off, None→use external_mode.
+    include_external: bool | None = None
+
+    @model_validator(mode="after")
+    def _apply_legacy_include_external(self) -> RetrievalOptions:
+        if self.include_external is True:
+            return self.model_copy(update={"external_mode": "on"})
+        if self.include_external is False:
+            return self.model_copy(update={"external_mode": "off"})
+        return self
 
 
 class AgentRequest(BaseModel):
@@ -156,6 +170,7 @@ class AgentResponse(BaseModel):
     jurisdiction: str | None = None
     pathway_id: str | None = None
     conversation_id: str | None = None
+    retrieval_decision: str | None = None
 
 
 def validate_agent_request(

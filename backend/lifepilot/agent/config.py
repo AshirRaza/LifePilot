@@ -28,6 +28,13 @@ def _env_str(name: str, default: str = "") -> str:
     return str(raw).strip()
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class AgentConfig:
     """Runtime limits and LLM settings."""
@@ -52,6 +59,9 @@ class AgentConfig:
     llm_output_cost_per_mtok: float = 0.0
     default_retrieval_top_k: int = 8
     max_retrieval_top_k: int = 20
+    # Deprecated no-op for orchestration: external_mode=auto already triggers
+    # connectors when internal evidence is thin. Kept for env/config compatibility.
+    external_fallback_on_insufficient_internal: bool = False
 
     @property
     def llm_configured(self) -> bool:
@@ -87,6 +97,9 @@ def get_agent_config() -> AgentConfig:
         llm_output_cost_per_mtok=_env_float("LIFEPILOT_LLM_OUTPUT_COST_PER_MTOK", 0.0),
         default_retrieval_top_k=_env_int("LIFEPILOT_AGENT_DEFAULT_TOP_K", 8),
         max_retrieval_top_k=_env_int("LIFEPILOT_AGENT_MAX_TOP_K", 20),
+        external_fallback_on_insufficient_internal=_env_bool(
+            "LIFEPILOT_AGENT_EXTERNAL_FALLBACK", False
+        ),
     )
 
 

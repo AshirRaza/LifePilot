@@ -2,7 +2,7 @@
 
 AI-powered personal administration for complex life transitions—starting with international relocation and immigration admin.
 
-This repo is an **evidence-backed knowledge foundation**: approved official sources are ingested, versioned, assessed for pathway coverage, chunked, and retrieved via hybrid RAG. A LangGraph agent orchestrates internal evidence (and optional external connectors) and can produce **Claude grounded answers** when Anthropic is configured. Nothing here is legal advice.
+This repo is an **evidence-backed knowledge foundation**: approved official sources are ingested, versioned, assessed for pathway coverage, chunked, and retrieved via hybrid RAG. A LangGraph agent uses the curated knowledge base by default and **automatically** calls approved official external connectors when risk, freshness, thin evidence, or conflicts warrant verification. It can produce **Claude grounded answers** when Anthropic is configured. Nothing here is legal advice. External hits stay `unverified_external` and never silently update the corpus.
 
 | Evidence class | Meaning |
 |---|---|
@@ -74,12 +74,14 @@ python scripts/query_internal_knowledge.py --query "Skilled Worker salary" --jur
 # External connectors (unverified_external; no corpus writes)
 python scripts/query_external_knowledge.py --pathway-id gb_skilled_worker --jurisdiction GB
 
-# Evidence-only orchestration (no LLM key required)
+# Evidence-only orchestration (no LLM key required; external_mode=auto by default)
 python scripts/run_agent_evidence.py --question "What are the UK Skilled Worker visa requirements?" --jurisdiction GB --pathway gb_skilled_worker
 
 # Grounded answer via Claude (requires ANTHROPIC_API_KEY + LIFEPILOT_LLM_PROVIDER=anthropic)
 python scripts/ask_lifepilot.py --question "What are the requirements for a UK Skilled Worker visa?" --jurisdiction GB
-python scripts/ask_lifepilot.py --question "…" --jurisdiction GB --include-external --json
+# Force connectors / internal-only (benchmarks should use --internal-only or include_external=false)
+python scripts/ask_lifepilot.py --question "…" --jurisdiction GB --external-mode on --json
+python scripts/ask_lifepilot.py --question "…" --jurisdiction GB --internal-only --json
 
 # Coverage / readiness
 python scripts/run_corpus_reliability.py status --with-db
@@ -87,6 +89,16 @@ python scripts/run_corpus_reliability.py status --with-db
 # Evaluation (offline-friendly; paid runs are budget-gated)
 python scripts/run_grounded_qa_eval.py --dry-run
 python scripts/audit_grounded_answers.py
+
+# Official-source freshness ages (uses existing DocumentVersion rows)
+python scripts/run_source_freshness_check.py
+
+# Automated KB maintenance (dry-run default; --execute to fetch/classify)
+python scripts/run_knowledge_maintenance.py --dry-run --limit 10
+python scripts/run_knowledge_maintenance.py --execute --limit 10 --jurisdiction NL
+
+# National official-source live smoke (NL/IE/FR/SG; no KB writes)
+python scripts/run_national_official_smoke.py
 
 # Tests
 pytest -q
@@ -112,7 +124,8 @@ Maintenance notes: `docs/maintenance/`.
 | Registry, ingest, coverage, RAG hybrid retrieval | Auth + multi-turn checkpointing |
 | External connectors | FastAPI + frontend MVP |
 | LangGraph evidence agent + Claude grounded answers | Personalized eligibility (out of scope until verified facts) |
-| Grounding audit / answer composition hardening | Product API surface (later) |
+| Grounding audit / intelligent hybrid retrieval (9C.4) | Product API surface (later) |
+| National official connectors + KB maintenance (9C.5) | Personalized eligibility (later) |
 
 ## Schema (core)
 

@@ -29,6 +29,8 @@ PROVIDER_JURISDICTIONS: dict[ProviderId, frozenset[str]] = {
     ProviderId.EURLEX_CELLAR: frozenset({"EU", "DE", "NL", "FR", "IE"}),
     ProviderId.US_FEDERAL_REGISTER: frozenset({"US"}),
     ProviderId.EU_IMMIGRATION_PORTAL: frozenset({"EU", "DE", "NL", "FR", "IE"}),
+    # Curated national immigration pages (allowlisted hosts only).
+    ProviderId.NATIONAL_OFFICIAL: frozenset({"NL", "IE", "FR", "SG"}),
 }
 
 JURISDICTION_FROM_PATHWAY_PREFIX: dict[str, str] = {

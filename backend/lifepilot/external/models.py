@@ -15,6 +15,7 @@ class ProviderId(str, Enum):
     EURLEX_CELLAR = "eurlex_cellar"
     US_FEDERAL_REGISTER = "us_federal_register"
     EU_IMMIGRATION_PORTAL = "eu_immigration_portal"
+    NATIONAL_OFFICIAL = "national_official"
 
 
 class RetrievalStatus(str, Enum):

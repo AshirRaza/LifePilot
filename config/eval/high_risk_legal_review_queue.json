@@ -1,0 +1,101 @@
+{
+  "queue_id": "high_risk_legal_review_v1",
+  "created_for_phase": "9C.3",
+  "notes": [
+    "Automated checks are not human legal verification.",
+    "Status values: requires_human_review | automatically_checked | human_verified | conflicting_evidence | insufficient_evidence | potentially_outdated"
+  ],
+  "items": [
+    {
+      "id": "GB-SW-SALARY",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "claim": "Skilled Worker minimum salary / going rate thresholds",
+      "official_source_hint": "https://www.gov.uk/skilled-worker-visa",
+      "verification_status": "requires_human_review",
+      "verification_method": "pending_official_page_review",
+      "effective_date": null,
+      "exceptions": ["transitional / healthcare / education / pre-2024 CoS routes may differ"],
+      "reviewer": null,
+      "uncertainty": "Thresholds change; corpus passages may lag official pages."
+    },
+    {
+      "id": "GB-STU-MAINTENANCE",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "claim": "Student visa maintenance / financial requirements",
+      "official_source_hint": "https://www.gov.uk/student-visa",
+      "verification_status": "requires_human_review",
+      "verification_method": "pending_official_page_review",
+      "effective_date": null,
+      "exceptions": ["location and course-dependent amounts"],
+      "reviewer": null,
+      "uncertainty": null
+    },
+    {
+      "id": "NL-HSM-SALARY",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "claim": "Highly skilled migrant salary criterion (including age/category distinctions)",
+      "official_source_hint": "https://ind.nl",
+      "verification_status": "requires_human_review",
+      "verification_method": "pending_official_page_review",
+      "effective_date": null,
+      "exceptions": ["orientation year / reduced criterion where applicable"],
+      "reviewer": null,
+      "uncertainty": null
+    },
+    {
+      "id": "IE-CSEP-REMUNERATION",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "claim": "Critical Skills Employment Permit remuneration requirements",
+      "official_source_hint": "enterprise.gov.ie critical-skills pages",
+      "verification_status": "requires_human_review",
+      "verification_method": "pending_official_page_review",
+      "effective_date": null,
+      "exceptions": ["occupation list interactions; do not confuse with GEP thresholds"],
+      "reviewer": null,
+      "uncertainty": "F07 showed GEP figures can surface beside CSEP questions."
+    },
+    {
+      "id": "IE-GEP-REMUNERATION",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_general_employment_permit",
+      "claim": "General Employment Permit remuneration thresholds",
+      "official_source_hint": "enterprise.gov.ie general-employment pages",
+      "verification_status": "requires_human_review",
+      "verification_method": "pending_official_page_review",
+      "effective_date": null,
+      "exceptions": [],
+      "reviewer": null,
+      "uncertainty": null
+    },
+    {
+      "id": "SG-EP-SALARY",
+      "jurisdiction": "SG",
+      "pathway_id": "sg_employment_pass",
+      "claim": "Employment Pass qualifying salary / age / sector / COMPASS criteria",
+      "official_source_hint": "https://www.mom.gov.sg",
+      "verification_status": "requires_human_review",
+      "verification_method": "pending_official_page_review",
+      "effective_date": null,
+      "exceptions": ["age-dependent and sector-specific differences"],
+      "reviewer": null,
+      "uncertainty": null
+    },
+    {
+      "id": "FR-PASSEPORT-TALENT",
+      "jurisdiction": "FR",
+      "pathway_id": "fr_passeport_talent",
+      "claim": "Passeport Talent / carte talent purpose and core categories (E15 gap)",
+      "official_source_hint": "https://www.service-public.gouv.fr/particuliers/vosdroits/F16922",
+      "verification_status": "requires_human_review",
+      "verification_method": "corpus_plus_national_official_9c5",
+      "effective_date": null,
+      "exceptions": [],
+      "reviewer": null,
+      "uncertainty": "9C.5: F16922/N19804 now in approved corpus with retrieval hits; national_official live fetch OK. Still not human_verified for legal completeness."
+    }
+  ]
+}

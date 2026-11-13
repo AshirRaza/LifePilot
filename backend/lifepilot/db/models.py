@@ -293,6 +293,10 @@ class DocumentVersion(Base):
     content_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     language: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Successful unchanged recheck time; never replaces retrieved_at provenance.
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     content_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     byte_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)

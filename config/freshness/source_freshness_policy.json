@@ -1,0 +1,53 @@
+{
+  "policy_id": "source_freshness_policy_v1",
+  "notes": [
+    "Operational recheck targets, not guarantees of legal-change detection.",
+    "A changed webpage is not necessarily a changed law.",
+    "Do not invent effective dates."
+  ],
+  "categories": {
+    "salary_thresholds_financial": {"recheck_hours": 24},
+    "application_fees": {"recheck_hours": 24},
+    "eligibility_rules_exemptions": {"recheck_hours": 72},
+    "application_procedures_documents": {"recheck_hours": 168},
+    "general_explanatory_guidance": {"recheck_hours": 336}
+  },
+  "priority_sources": [
+    {
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "category": "salary_thresholds_financial",
+      "url_contains": "/skilled-worker-visa"
+    },
+    {
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "category": "salary_thresholds_financial",
+      "url_contains": "/student-visa"
+    },
+    {
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "category": "salary_thresholds_financial",
+      "url_contains": "ind.nl"
+    },
+    {
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "category": "salary_thresholds_financial",
+      "url_contains": "critical-skills"
+    },
+    {
+      "jurisdiction": "IE",
+      "pathway_id": "ie_general_employment_permit",
+      "category": "salary_thresholds_financial",
+      "url_contains": "general-employment"
+    },
+    {
+      "jurisdiction": "SG",
+      "pathway_id": "sg_employment_pass",
+      "category": "salary_thresholds_financial",
+      "url_contains": "employment-pass"
+    }
+  ]
+}

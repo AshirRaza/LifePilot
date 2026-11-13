@@ -8,6 +8,7 @@ It never writes to the source registry or document store.
 from __future__ import annotations
 
 import logging
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -22,10 +23,11 @@ from lifepilot.external.models import RetrievalStatus
 
 logger = logging.getLogger(__name__)
 
+# Identify as a polite research bot. Some government hosts (e.g. enterprise.gov.ie)
+# return empty bodies for older UA strings that emphasize "API discovery".
 EXTERNAL_USER_AGENT = (
-    "LifePilotExternal/0.1 "
-    "(+https://github.com/AshirRaza/LifePilot; "
-    "read-only public API discovery; does not ingest documents)"
+    "Mozilla/5.0 (compatible; LifePilotBot/0.1; "
+    "+https://github.com/AshirRaza/LifePilot)"
 )
 
 
@@ -72,7 +74,7 @@ class ExternalHttpClient:
             timeout=self.config.timeout_seconds,
             follow_redirects=True,
             max_redirects=self.config.max_redirects,
-            verify=certifi.where(),
+            verify=ssl.create_default_context(cafile=certifi.where()),
             headers={
                 "User-Agent": EXTERNAL_USER_AGENT,
                 "Accept": "application/json, application/ld+json, text/plain, */*;q=0.1",
@@ -124,11 +126,18 @@ class ExternalHttpClient:
         use_cache: bool = True,
         cache_ttl: float | None = None,
     ) -> HttpResponse:
+        # Prefer HTML for official guidance pages; JSON-first Accept causes
+        # some government hosts (e.g. enterprise.gov.ie) to return empty bodies.
+        merged = {
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        }
+        if headers:
+            merged.update(headers)
         return self._request(
             "GET",
             url,
             params=params,
-            headers=headers,
+            headers=merged,
             use_cache=use_cache,
             cache_ttl=cache_ttl,
             expect_json=False,

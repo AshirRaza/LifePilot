@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 
 from lifepilot.agent.answer import AnswerClaim, GroundedAnswer
 from lifepilot.agent.evidence import EvidenceItem, EvidenceSourceType
+from lifepilot.agent.pathway_applicability import (
+    classify_pathway_applicability,
+    should_drop_for_pathway,
+)
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
 # Conservative overlap: claim tokens should appear in cited passages.
@@ -228,11 +232,12 @@ def validate_and_ground_answer(
     *,
     evidence: list[EvidenceItem],
     jurisdiction: str,
+    pathway_id: str | None = None,
 ) -> GroundingResult:
     """Mechanically validate citations, then apply conservative overlap grounding.
 
     A valid evidence_id is necessary but not sufficient for semantic support.
-    Claims that fail overlap / numeric checks are dropped.
+    Claims that fail overlap / numeric / pathway-applicability checks are dropped.
     The final user-visible answer is rebuilt so rejected claims cannot survive
     as unsupported free-text.
     """
@@ -291,11 +296,36 @@ def validate_and_ground_answer(
             dropped += 1
             continue
 
+        pathway_result = classify_pathway_applicability(
+            claim=claim.claim,
+            cited=cited,
+            pathway_id=pathway_id,
+        )
+        if should_drop_for_pathway(pathway_result, claim=claim.claim):
+            warnings.append(
+                "dropped_claim:pathway_applicability:"
+                f"{pathway_result.classification.value}:{pathway_result.reason}:"
+                + ",".join(c.evidence_id for c in cited)
+            )
+            dropped += 1
+            continue
+
+        uncertainty = claim.uncertainty
+        if (
+            pathway_result.classification.value == "related_context"
+            and pathway_id
+            and not uncertainty
+        ):
+            uncertainty = (
+                "Cited figure/rule may relate to a different pathway; "
+                "not treated as a confirmed requirement for the requested pathway."
+            )
+
         kept.append(
             AnswerClaim(
                 claim=claim.claim,
                 evidence_ids=[c.evidence_id for c in cited],
-                uncertainty=claim.uncertainty,
+                uncertainty=uncertainty,
             )
         )
 
