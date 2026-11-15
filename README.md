@@ -2,7 +2,7 @@
 
 AI-powered personal administration for complex life transitions—starting with international relocation and immigration admin.
 
-This repo is an **evidence-backed knowledge foundation**: approved official sources are ingested, versioned, assessed for pathway coverage, chunked, and retrieved via hybrid RAG. A LangGraph agent uses the curated knowledge base by default and **automatically** calls approved official external connectors when risk, freshness, thin evidence, or conflicts warrant verification. It can produce **Claude grounded answers** when Anthropic is configured. Nothing here is legal advice. External hits stay `unverified_external` and never silently update the corpus.
+This repo is an **evidence-backed knowledge foundation**: approved official sources are ingested, versioned, assessed for pathway coverage, chunked, and retrieved via hybrid RAG. A LangGraph agent uses the curated knowledge base by default and **automatically** calls approved official external connectors when risk, freshness, thin evidence, or conflicts warrant verification. It produces **Claude grounded answers** (when Anthropic is configured) and runs **unified automated legal verification** on material claims before the final response. Nothing here is legal advice. External hits stay `unverified_external` and never silently update the corpus.
 
 | Evidence class | Meaning |
 |---|---|
@@ -19,9 +19,11 @@ Python 3.11+ · PostgreSQL 17 + pgvector · SQLAlchemy/Alembic · local E5 embed
 ```text
 backend/lifepilot/
   db/  registry/  crawl/  extract/  ingest/
-  coverage/  rag/  external/  agent/
+  coverage/  rag/  external/  agent/  eval/  maintenance/
 scripts/   config/   alembic/   tests/   docs/
 data/ (gitignored local corpus, runs, backups)
+
+Agent flow: source/retrieval → generation → grounding → legal verification → response
 ```
 
 ## Status (approx.)
@@ -35,7 +37,7 @@ data/ (gitignored local corpus, runs, backups)
 | Current chunks + embeddings | 9883 |
 | Provisionally ready pathways | 7 |
 | Human-verified pathways | 0 |
-| Tests | 506 passed, 5 skipped |
+| Tests | 575 passed, 5 skipped |
 
 Provisionally ready: `gb_skilled_worker`, `gb_student`, `ie_critical_skills_employment_permit`, `ie_general_employment_permit`, `nl_highly_skilled_migrant`, `nl_naturalisation`, `sg_employment_pass`.
 
@@ -88,7 +90,10 @@ python scripts/run_corpus_reliability.py status --with-db
 
 # Evaluation (offline-friendly; paid runs are budget-gated)
 python scripts/run_grounded_qa_eval.py --dry-run
+python scripts/run_comparative_answer_eval.py --dry-run
+python scripts/run_unified_verification_eval.py --dry-run
 python scripts/audit_grounded_answers.py
+# Script index: scripts/README.md
 
 # Official-source freshness ages (uses existing DocumentVersion rows)
 python scripts/run_source_freshness_check.py

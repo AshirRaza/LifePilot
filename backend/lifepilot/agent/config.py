@@ -59,9 +59,13 @@ class AgentConfig:
     llm_output_cost_per_mtok: float = 0.0
     default_retrieval_top_k: int = 8
     max_retrieval_top_k: int = 20
-    # Deprecated no-op for orchestration: external_mode=auto already triggers
-    # connectors when internal evidence is thin. Kept for env/config compatibility.
+    # Deprecated no-op: external_mode=auto already covers thin-internal cases.
+    # Retained so existing env/tests keep working; do not add new callers.
     external_fallback_on_insufficient_internal: bool = False
+    # Unified legal verification (Phase 9D.2) — production default on.
+    # max_external=0 reuses already-retrieved evidence only (no extra connector calls).
+    verification_max_external_corroborations: int = 0
+    verification_enabled: bool = True
 
     @property
     def llm_configured(self) -> bool:
@@ -100,6 +104,10 @@ def get_agent_config() -> AgentConfig:
         external_fallback_on_insufficient_internal=_env_bool(
             "LIFEPILOT_AGENT_EXTERNAL_FALLBACK", False
         ),
+        verification_max_external_corroborations=max(
+            0, _env_int("LIFEPILOT_VERIFICATION_MAX_EXTERNAL", 0)
+        ),
+        verification_enabled=_env_bool("LIFEPILOT_VERIFICATION_ENABLED", True),
     )
 
 

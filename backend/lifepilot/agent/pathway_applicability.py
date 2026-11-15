@@ -15,6 +15,15 @@ from lifepilot.agent.evidence import EvidenceItem
 
 # Markers are lowercase phrases / URL fragments associated with inventory pathway IDs.
 # Prefer extending this map from inventory aliases rather than inventing new pathway IDs.
+# URL path fragments are authoritative when present — a GEP page that mentions the
+# Critical Skills Occupations List must not be treated as Critical Skills evidence.
+_PATHWAY_URL_FRAGMENTS: dict[str, tuple[str, ...]] = {
+    "ie_critical_skills_employment_permit": ("/critical-skills", "critical-skills-employment"),
+    "ie_general_employment_permit": ("/general-employment", "general-employment-permit"),
+    "gb_skilled_worker": ("/skilled-worker-visa",),
+    "gb_student": ("/student-visa",),
+}
+
 _PATHWAY_MARKERS: dict[str, tuple[str, ...]] = {
     "ie_critical_skills_employment_permit": (
         "critical skills employment permit",
@@ -56,7 +65,7 @@ _COMPARISON_RE = re.compile(
     r"(?i)\b("
     r"compared with|compared to|unlike|whereas|by contrast|distinct from|"
     r"separate from|different from|as opposed to|rather than|"
-    r"for the .+ permit|for .+ employment permit"
+    r"in contrast to|as distinct from"
     r")\b"
 )
 _NUMERIC_RE = re.compile(
@@ -92,6 +101,11 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").lower()).strip()
 
 
+def has_explicit_comparison_language(text: str) -> bool:
+    """True when the claim uses explicit cross-pathway comparison wording."""
+    return bool(_COMPARISON_RE.search(text or ""))
+
+
 def detect_pathway_ids(text: str) -> list[str]:
     """Return pathway IDs whose markers appear in text (longest-marker preference)."""
     blob = _normalize(text)
@@ -105,7 +119,27 @@ def detect_pathway_ids(text: str) -> list[str]:
     return found
 
 
+def pathway_ids_from_url(url: str | None) -> list[str]:
+    blob = (url or "").lower()
+    if not blob:
+        return []
+    hits: list[str] = []
+    for pathway_id, frags in _PATHWAY_URL_FRAGMENTS.items():
+        if any(f in blob for f in frags):
+            hits.append(pathway_id)
+    return hits
+
+
 def evidence_pathway_signals(item: EvidenceItem) -> list[str]:
+    """Pathway signals for an evidence item.
+
+    When the official URL clearly identifies a pathway page, URL signals win so
+    cross-mentions (e.g. GEP text referencing the Critical Skills list) cannot
+    re-attribute that page's figures.
+    """
+    url_hits = pathway_ids_from_url(item.source_url)
+    if url_hits:
+        return url_hits
     parts = [
         item.passage_text or "",
         item.heading_path or "",
@@ -113,6 +147,53 @@ def evidence_pathway_signals(item: EvidenceItem) -> list[str]:
         str((item.provenance or {}).get("title") or ""),
     ]
     return detect_pathway_ids(" ".join(parts))
+
+
+def normalize_numeric_literal(value: str) -> str:
+    """Strip spaces/commas so £38,700 and £38700 compare equal."""
+    return re.sub(r"[\s,]", "", value or "")
+
+
+def numeric_literals_in_text(text: str) -> list[str]:
+    return _NUMERIC_RE.findall(text or "")
+
+
+def passage_contains_literal(passage: str, literal: str) -> bool:
+    compact_passage = normalize_numeric_literal(passage or "")
+    compact_lit = normalize_numeric_literal(literal)
+    if compact_lit and compact_lit in compact_passage:
+        return True
+    digits = re.sub(r"[^\d.]", "", literal or "")
+    return bool(digits and digits in compact_passage)
+
+
+def number_supported_by_requested_pathway_passage(
+    *,
+    claim: str,
+    cited: list[EvidenceItem],
+    pathway_id: str,
+) -> bool:
+    """True when each claim numeric appears in a passage that marks the requested pathway.
+
+    Prevents citing a Critical Skills page *and* a GEP salary passage, then treating
+    the GEP figure as a Critical Skills requirement (F07 / X05 class failures).
+    """
+    literals = numeric_literals_in_text(claim)
+    if not literals:
+        return True
+    requested = (pathway_id or "").strip()
+    if not requested:
+        return True
+    for lit in literals:
+        passages_with_lit = [
+            item for item in cited if passage_contains_literal(item.passage_text or "", lit)
+        ]
+        if not passages_with_lit:
+            # Literal absent from citations — handled by numeric grounding elsewhere.
+            continue
+        if not any(requested in evidence_pathway_signals(item) for item in passages_with_lit):
+            return False
+    return True
 
 
 def classify_pathway_applicability(
@@ -141,10 +222,9 @@ def classify_pathway_applicability(
     evidence_tuple = tuple(evidence_pathways)
 
     has_number = bool(_NUMERIC_RE.search(claim or ""))
-    comparison = bool(_COMPARISON_RE.search(claim or "")) or (
-        requested in claim_pathways
-        and any(p != requested for p in claim_pathways)
-    )
+    # Only explicit comparison language counts — merely naming two pathways must
+    # not bypass numeric locality (F07/X05 class failures).
+    comparison = has_explicit_comparison_language(claim)
 
     # Explicit comparison involving the requested pathway.
     if comparison and (
@@ -171,25 +251,39 @@ def classify_pathway_applicability(
             pathways_in_evidence=evidence_tuple,
         )
 
+    # Claim clearly about another pathway only → related context (not a drop).
+    foreign_only_claim = (
+        has_number
+        and bool(claim_pathways)
+        and requested not in claim_pathways
+        and all(p != requested for p in claim_pathways)
+    )
+    if foreign_only_claim:
+        return PathwayApplicabilityResult(
+            classification=PathwayApplicability.RELATED_CONTEXT,
+            reason="claim_about_other_pathway_only",
+            requested_pathway_id=requested,
+            pathways_in_claim=claim_pathways,
+            pathways_in_evidence=evidence_tuple,
+        )
+
+    # Numeric locality for requested-pathway (or unscoped) claims: the figure must
+    # appear in a passage that also marks the requested pathway.
+    if has_number and not number_supported_by_requested_pathway_passage(
+        claim=claim,
+        cited=cited,
+        pathway_id=requested,
+    ):
+        return PathwayApplicabilityResult(
+            classification=PathwayApplicability.CROSS_PATHWAY,
+            reason="numeric_literal_not_in_requested_pathway_passage",
+            requested_pathway_id=requested,
+            pathways_in_claim=claim_pathways,
+            pathways_in_evidence=evidence_tuple,
+        )
+
     # Direct support: evidence mentions requested pathway.
     if requested in evidence_tuple:
-        # Reject if claim attributes a number specifically to another pathway only
-        # without comparison language, while evidence is mixed — still OK if claim
-        # is about requested pathway.
-        foreign_only_claim = (
-            has_number
-            and claim_pathways
-            and requested not in claim_pathways
-            and all(p != requested for p in claim_pathways)
-        )
-        if foreign_only_claim:
-            return PathwayApplicabilityResult(
-                classification=PathwayApplicability.RELATED_CONTEXT,
-                reason="claim_about_other_pathway_with_requested_evidence_present",
-                requested_pathway_id=requested,
-                pathways_in_claim=claim_pathways,
-                pathways_in_evidence=evidence_tuple,
-            )
         return PathwayApplicabilityResult(
             classification=PathwayApplicability.DIRECT,
             reason="evidence_mentions_requested_pathway",

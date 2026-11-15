@@ -121,6 +121,7 @@ class TimingMetadata(BaseModel):
     normalize_ms: float | None = None
     llm_ms: float | None = None
     grounding_ms: float | None = None
+    verification_ms: float | None = None
 
 
 class UsageMetadata(BaseModel):
@@ -162,6 +163,8 @@ class AgentResponse(BaseModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     answer: str | None = None
     claims: list[AnswerClaim] = Field(default_factory=list)
+    pre_verification_claims: list[AnswerClaim] = Field(default_factory=list)
+    verification: dict[str, Any] | None = None
     missing_information: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)

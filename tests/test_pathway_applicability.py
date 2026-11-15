@@ -179,6 +179,47 @@ def test_ambiguous_numeric_without_pathway_markers_dropped():
     assert result.answer.claims == []
 
 
+def test_mixed_citations_gep_figure_not_attributed_to_csep():
+    """F07/X05: citing both pages must not let a GEP-only figure become CSEP."""
+    gep = _ev(
+        text=(
+            "General Employment Permit remuneration criteria. "
+            "Minimum annual remuneration of €68,911 for eligible employment."
+        ),
+        url="https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/general-employment-permit/",
+        chunk_id=1,
+    )
+    csep = _ev(
+        text=(
+            "Critical Skills Employment Permit eligibility depends on occupation "
+            "type and proposed remuneration level."
+        ),
+        url="https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/critical-skills-employment-permit/",
+        chunk_id=2,
+    )
+    raw = GroundedAnswer(
+        answer="Critical Skills minimum is €68,911.",
+        claims=[
+            AnswerClaim(
+                claim=(
+                    "The Critical Skills Employment Permit minimum annual "
+                    "remuneration is €68,911."
+                ),
+                evidence_ids=[gep.evidence_id, csep.evidence_id],
+            )
+        ],
+    )
+    result = validate_and_ground_answer(
+        raw,
+        evidence=[gep, csep],
+        jurisdiction="IE",
+        pathway_id="ie_critical_skills_employment_permit",
+    )
+    assert result.answer is not None
+    assert result.answer.claims == []
+    assert "€68,911" not in (result.answer.answer or "")
+
+
 def test_no_pathway_hint_skips_pathway_drop():
     gep = _ev(
         text="General Employment Permit minimum annual remuneration of €68,911.",

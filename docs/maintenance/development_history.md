@@ -13,6 +13,8 @@ accumulate narrative phase reports.
 | `config/eval/high_risk_legal_review_queue.json` | High-risk legal review state |
 | `data/runs/comparative_answer_eval/` | 9D.1 paired mode results / worksheet |
 | `data/runs/phase_9d1_comparative_answer_evaluation.md` | 9D.1 comparative evaluation report |
+| `data/runs/unified_verification_eval/` | 9D.2 targeted verification eval results |
+| `data/runs/phase_9d2_unified_legal_verification_report.md` | 9D.2 unified verification report |
 | `config/freshness/source_freshness_policy.json` | Recheck intervals |
 | `config/external/national_official_sources.json` | NL/IE/FR/SG official URL catalog |
 | `data/runs/grounded_qa_eval/baseline_9c1/` | Immutable 9C.1 machine baseline |
@@ -31,6 +33,19 @@ accumulate narrative phase reports.
 - `run_knowledge_maintenance.py` → `knowledge_maintenance_report.json`
 - `run_national_official_smoke.py` → `national_official_smoke.json`
 - `run_grounded_qa_eval.py` → eval markdown / `results.jsonl`
+- `run_comparative_answer_eval.py` → `comparative_answer_eval/` (resume-safe)
+- `run_unified_verification_eval.py` → `unified_verification_eval/`
 - `write_grounding_audit_report.py` → grounding audit markdown
 
 Do not delete `baseline_9c1/` or rewrite historical evaluation JSONL artifacts.
+
+## Agent configuration (active)
+
+| Setting | Default | Controls |
+|---|---|---|
+| `AgentRequest.retrieval.external_mode` | `auto` | Hybrid retrieval policy |
+| `LIFEPILOT_VERIFICATION_ENABLED` | true | Unified legal verification node |
+| `LIFEPILOT_VERIFICATION_MAX_EXTERNAL` | 0 | Extra official corroboration fetches |
+| `LIFEPILOT_AGENT_EXTERNAL_FALLBACK` | false | Deprecated no-op (compat only) |
+
+See `.env.example` and `scripts/README.md`.

@@ -37,6 +37,7 @@ from lifepilot.agent.providers import (  # noqa: E402
     get_llm_provider,
     reset_llm_provider_cache,
 )
+from lifepilot.eval.accounting import estimate_usage_cost_usd  # noqa: E402
 from lifepilot.eval.comparative import (  # noqa: E402
     MODES,
     ExternalOnlyEvidenceOrchestrator,
@@ -151,11 +152,13 @@ def _estimate_cost(usage: dict[str, Any] | None, cfg) -> float:
         return 0.0
     if usage.get("estimated_cost_usd") is not None:
         return float(usage["estimated_cost_usd"] or 0.0)
-    inn = float(usage.get("input_tokens") or 0)
-    out = float(usage.get("output_tokens") or 0)
-    return (inn / 1_000_000.0) * cfg.llm_input_cost_per_mtok + (
-        out / 1_000_000.0
-    ) * cfg.llm_output_cost_per_mtok
+    in_rate = float(cfg.llm_input_cost_per_mtok or 2.0)
+    out_rate = float(cfg.llm_output_cost_per_mtok or 10.0)
+    return estimate_usage_cost_usd(
+        usage,
+        input_cost_per_mtok=in_rate,
+        output_cost_per_mtok=out_rate,
+    )
 
 
 def run_case_mode(case: dict[str, Any], mode: str) -> dict[str, Any]:
@@ -230,6 +233,8 @@ def run_case_mode(case: dict[str, Any], mode: str) -> dict[str, Any]:
         "agent_status": payload.get("status"),
         "answer": payload.get("answer"),
         "claims": payload.get("claims"),
+        "pre_verification_claims": payload.get("pre_verification_claims"),
+        "verification": payload.get("verification"),
         "warnings": payload.get("warnings"),
         "errors": payload.get("errors"),
         "missing_information": payload.get("missing_information"),
@@ -258,6 +263,7 @@ def run_case_mode(case: dict[str, Any], mode: str) -> dict[str, Any]:
             ),
             "llm": (payload.get("timing") or {}).get("llm_ms"),
             "grounding": (payload.get("timing") or {}).get("grounding_ms"),
+            "verification": (payload.get("timing") or {}).get("verification_ms"),
         },
         "usage": {
             "input_tokens": usage.get("input_tokens"),

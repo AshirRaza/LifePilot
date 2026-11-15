@@ -1,4 +1,13 @@
-"""LifePilot immigration agent — evidence orchestration and grounded answers."""
+"""LifePilot immigration agent — evidence orchestration and grounded answers.
+
+Pipeline (LangGraph): validate → evidence → generate+ground → legal_verification → finalize.
+
+Subsystem map:
+- orchestration / retrieval_policy — hybrid RAG + selective external connectors
+- generation / grounding — Claude structured answers + citation/numeric/pathway grounding
+- pathway_applicability — cross-pathway attribution (e.g. IE CSEP vs GEP)
+- verification / corroboration — unified automated legal verification (prod + eval)
+"""
 
 from lifepilot.agent.answer import AnswerClaim, GroundedAnswer
 from lifepilot.agent.config import AgentConfig, get_agent_config
@@ -56,6 +65,11 @@ from lifepilot.agent.providers import (
 )
 from lifepilot.agent.runner import run_agent
 from lifepilot.agent.state import CHECKPOINTING_BOUNDARY_NOTE, AgentGraphState
+from lifepilot.agent.verification import (
+    ClaimVerificationStatus,
+    VerificationReport,
+    verify_material_claims,
+)
 
 __all__ = [
     "DEFAULT_ANTHROPIC_MODEL",
@@ -71,6 +85,7 @@ __all__ = [
     "AnthropicLLMProvider",
     "AnswerClaim",
     "CHECKPOINTING_BOUNDARY_NOTE",
+    "ClaimVerificationStatus",
     "DisabledLLMProvider",
     "EvidenceItem",
     "EvidenceOrchestrator",
@@ -88,6 +103,7 @@ __all__ = [
     "StructuredLLMResult",
     "TimingMetadata",
     "UsageMetadata",
+    "VerificationReport",
     "build_agent_graph",
     "build_evidence_id",
     "evidence_from_external_item",
@@ -105,4 +121,5 @@ __all__ = [
     "set_evidence_orchestrator_override",
     "set_llm_provider_override",
     "validate_agent_request",
+    "verify_material_claims",
 ]

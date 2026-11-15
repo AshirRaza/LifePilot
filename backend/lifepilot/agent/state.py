@@ -44,6 +44,8 @@ class AgentGraphState(TypedDict):
     evidence: list[dict[str, Any]]
     answer: str | None
     claims: NotRequired[list[dict[str, Any]]]
+    pre_verification_claims: NotRequired[list[dict[str, Any]]]
+    verification: NotRequired[dict[str, Any] | None]
 
     # Timing (milliseconds).
     validate_ms: float
@@ -55,6 +57,7 @@ class AgentGraphState(TypedDict):
     normalize_ms: NotRequired[float]
     llm_ms: NotRequired[float]
     grounding_ms: NotRequired[float]
+    verification_ms: NotRequired[float]
 
     # Extension bookkeeping.
     deferred_stages: NotRequired[list[str]]

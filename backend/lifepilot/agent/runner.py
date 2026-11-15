@@ -48,6 +48,17 @@ def _response_from_state(
         elif isinstance(item, dict):
             claims.append(AnswerClaim.model_validate(item))
 
+    pre_raw = state.get("pre_verification_claims") or []
+    pre_claims: list[AnswerClaim] = []
+    for item in pre_raw:
+        if isinstance(item, AnswerClaim):
+            pre_claims.append(item)
+        elif isinstance(item, dict):
+            try:
+                pre_claims.append(AnswerClaim.model_validate(item))
+            except Exception:  # noqa: BLE001
+                continue
+
     status_raw = state.get("status") or AgentStatus.SUCCESS.value
     try:
         status = AgentStatus(status_raw)
@@ -61,12 +72,18 @@ def _response_from_state(
     elif isinstance(usage_raw, dict):
         usage = UsageMetadata.model_validate(usage_raw)
 
+    verification = state.get("verification")
+    if verification is not None and not isinstance(verification, dict):
+        verification = None
+
     return AgentResponse(
         request_id=state.get("request_id") or request.ensure_request_id(),
         status=status,
         evidence=evidence,
         answer=state.get("answer"),
         claims=claims,
+        pre_verification_claims=pre_claims,
+        verification=verification,
         missing_information=list(state.get("missing_information") or []),
         warnings=list(state.get("warnings") or []),
         errors=list(state.get("errors") or []),
@@ -80,6 +97,7 @@ def _response_from_state(
             normalize_ms=state.get("normalize_ms"),
             llm_ms=state.get("llm_ms"),
             grounding_ms=state.get("grounding_ms"),
+            verification_ms=state.get("verification_ms"),
         ),
         usage=usage,
         jurisdiction=state.get("jurisdiction") or request.jurisdiction,

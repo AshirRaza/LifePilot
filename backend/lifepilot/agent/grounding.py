@@ -9,6 +9,7 @@ from lifepilot.agent.answer import AnswerClaim, GroundedAnswer
 from lifepilot.agent.evidence import EvidenceItem, EvidenceSourceType
 from lifepilot.agent.pathway_applicability import (
     classify_pathway_applicability,
+    normalize_numeric_literal,
     should_drop_for_pathway,
 )
 
@@ -103,19 +104,20 @@ def _overlap_ok(claim: str, passages: list[str]) -> bool:
     return len(overlap) >= _MIN_OVERLAP_TOKENS and ratio >= _MIN_OVERLAP_RATIO
 
 
-def _normalize_numeric(value: str) -> str:
-    return re.sub(r"[\s,]", "", value or "")
+def claim_passage_overlap_ok(claim: str, passages: list[str]) -> bool:
+    """Public overlap check used by grounding and unified verification."""
+    return _overlap_ok(claim, passages)
 
 
-def _numeric_literals_supported(claim: str, passages: list[str]) -> bool:
+def claim_numeric_literals_supported(claim: str, passages: list[str]) -> bool:
     """Reject claims that invent fees/thresholds/dates absent from cited passages."""
     literals = _NUMERIC_LITERAL_RE.findall(claim or "")
     if not literals:
         return True
-    joined = " ".join(passages or "")
-    joined_compact = _normalize_numeric(joined)
+    joined = " ".join(passages or [])
+    joined_compact = normalize_numeric_literal(joined)
     for lit in literals:
-        compact = _normalize_numeric(lit)
+        compact = normalize_numeric_literal(lit)
         if compact and compact in joined_compact:
             continue
         # Allow bare year/number if present with different currency formatting.
@@ -193,7 +195,7 @@ def compose_grounded_answer_text(
         if _META_SENTENCE_RE.search(sentence):
             # Keep cautious meta language, but still drop orphan numbers not in claims.
             nums = _NUMERIC_LITERAL_RE.findall(sentence)
-            if nums and not _numeric_literals_supported(sentence, [claim_blob]):
+            if nums and not claim_numeric_literals_supported(sentence, [claim_blob]):
                 continue
             retained.append(sentence)
             continue
@@ -204,7 +206,7 @@ def compose_grounded_answer_text(
         ratio = len(overlap) / max(1, len(st))
         if len(overlap) < _SENTENCE_CLAIM_MIN_TOKENS or ratio < _SENTENCE_CLAIM_OVERLAP_RATIO:
             continue
-        if not _numeric_literals_supported(sentence, [claim_blob]):
+        if not claim_numeric_literals_supported(sentence, [claim_blob]):
             continue
         retained.append(sentence)
 
@@ -281,14 +283,14 @@ def validate_and_ground_answer(
             continue
 
         passages = [c.passage_text for c in cited]
-        if not _overlap_ok(claim.claim, passages):
+        if not claim_passage_overlap_ok(claim.claim, passages):
             warnings.append(
                 "dropped_claim:insufficient_passage_overlap:"
                 + ",".join(c.evidence_id for c in cited)
             )
             dropped += 1
             continue
-        if not _numeric_literals_supported(claim.claim, passages):
+        if not claim_numeric_literals_supported(claim.claim, passages):
             warnings.append(
                 "dropped_claim:numeric_literal_not_in_passage:"
                 + ",".join(c.evidence_id for c in cited)

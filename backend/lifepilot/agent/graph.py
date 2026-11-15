@@ -1,4 +1,4 @@
-"""LangGraph workflow: validate → evidence → grounded answer → finalize."""
+"""LangGraph workflow: validate → evidence → grounded answer → verify → finalize."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 
+from lifepilot.agent.answer import AnswerClaim
 from lifepilot.agent.config import AgentConfig, get_agent_config
 from lifepilot.agent.contracts import AgentStatus, UsageMetadata
 from lifepilot.agent.evidence import EvidenceItem
@@ -16,6 +17,7 @@ from lifepilot.agent.generation import generate_grounded_answer
 from lifepilot.agent.orchestration import get_evidence_orchestrator
 from lifepilot.agent.providers import get_llm_provider
 from lifepilot.agent.state import AgentGraphState
+from lifepilot.agent.verification import verify_material_claims
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,7 @@ GRAPH_NODE_ORDER = (
     "validate_initialize",
     "evidence_extension_point",
     "answer_extension_point",
+    "legal_verification",
     "finalize",
 )
 
@@ -286,10 +289,116 @@ def answer_extension_point(state: AgentGraphState) -> dict[str, Any]:
         "missing_information": missing,
         "answer": result.answer,
         "claims": result.claims,
+        "pre_verification_claims": list(result.claims),
         "answer_ms": round((time.perf_counter() - started) * 1000, 3),
         "llm_ms": result.llm_ms,
         "grounding_ms": result.grounding_ms,
         "usage": None if usage is None else usage.model_dump(mode="json"),
+    }
+
+
+def legal_verification(state: AgentGraphState) -> dict[str, Any]:
+    """Unified automated legal verification (same path for prod and eval)."""
+    started = time.perf_counter()
+    step = _bump_step(state)
+    cfg = get_agent_config()
+    warnings = list(state.get("warnings") or [])
+    missing = list(state.get("missing_information") or [])
+    status = state.get("status") or AgentStatus.SUCCESS.value
+    errors = list(state.get("errors") or [])
+
+    if not cfg.verification_enabled:
+        return {
+            "step_count": step,
+            "verification_ms": 0.0,
+            "verification": {
+                "skipped": True,
+                "reason": "verification_disabled",
+            },
+        }
+
+    if status in {
+        AgentStatus.INVALID_REQUEST.value,
+        AgentStatus.EXECUTION_FAILURE.value,
+        AgentStatus.UNSUPPORTED_OPERATION.value,
+    }:
+        return {
+            "step_count": step,
+            "verification_ms": round((time.perf_counter() - started) * 1000, 3),
+            "verification": {"skipped": True, "reason": status},
+        }
+
+    claims_raw = state.get("claims") or []
+    claims: list[AnswerClaim] = []
+    for item in claims_raw:
+        if isinstance(item, AnswerClaim):
+            claims.append(item)
+        elif isinstance(item, dict):
+            try:
+                claims.append(AnswerClaim.model_validate(item))
+            except Exception:  # noqa: BLE001
+                continue
+
+    if not claims and not state.get("answer"):
+        return {
+            "step_count": step,
+            "verification_ms": round((time.perf_counter() - started) * 1000, 3),
+            "verification": {"skipped": True, "reason": "no_claims_or_answer"},
+            "pre_verification_claims": [],
+        }
+
+    evidence_items: list[EvidenceItem] = []
+    for raw in state.get("evidence") or []:
+        if isinstance(raw, EvidenceItem):
+            evidence_items.append(raw)
+        elif isinstance(raw, dict):
+            evidence_items.append(EvidenceItem.model_validate(raw))
+
+    corroborator = None
+    max_ext = int(cfg.verification_max_external_corroborations or 0)
+    if max_ext > 0:
+        from lifepilot.agent.corroboration import BoundedNationalCorroborator
+
+        corroborator = BoundedNationalCorroborator()
+
+    result = verify_material_claims(
+        answer=state.get("answer"),
+        claims=claims,
+        evidence=evidence_items,
+        jurisdiction=str(state.get("jurisdiction") or ""),
+        pathway_id=state.get("pathway_id"),
+        question=str(state.get("question") or ""),
+        missing_information=missing,
+        corroborator=corroborator,
+        max_external_corroborations=max_ext,
+    )
+
+    warnings.extend(result.warnings)
+    missing = list(result.missing_information)
+    out_status = status
+    if result.status_hint == "insufficient_evidence":
+        out_status = AgentStatus.INSUFFICIENT_EVIDENCE.value
+
+    # Merge any newly fetched corroboration evidence (unverified_external).
+    evidence_out = [e.model_dump(mode="json") for e in evidence_items]
+    # Corroborator may have added items only inside verify via working copy —
+    # report already records external_calls; evidence list stays request-scoped
+    # unless corroborator returns items attached through report (kept out of KB).
+
+    return {
+        "step_count": step,
+        "status": out_status,
+        "errors": errors,
+        "warnings": list(dict.fromkeys(warnings)),
+        "missing_information": missing,
+        "answer": result.answer,
+        "claims": [c.model_dump(mode="json") for c in result.claims],
+        "pre_verification_claims": [
+            c.model_dump(mode="json") for c in result.pre_verification_claims
+        ],
+        "evidence": evidence_out,
+        "verification": result.report.model_dump(mode="json"),
+        "verification_ms": result.report.verification_ms,
     }
 
 
@@ -300,6 +409,7 @@ def finalize(state: AgentGraphState) -> dict[str, Any]:
         float(state.get("validate_ms") or 0.0)
         + float(state.get("evidence_ms") or 0.0)
         + float(state.get("answer_ms") or 0.0)
+        + float(state.get("verification_ms") or 0.0)
     )
     status = state.get("status") or AgentStatus.SUCCESS.value
     if (
@@ -332,6 +442,7 @@ def build_agent_graph(config: AgentConfig | None = None) -> Any:
     graph.add_node("validate_initialize", validate_initialize)
     graph.add_node("evidence_extension_point", evidence_extension_point)
     graph.add_node("answer_extension_point", answer_extension_point)
+    graph.add_node("legal_verification", legal_verification)
     graph.add_node("finalize", finalize)
 
     graph.add_edge(START, "validate_initialize")
@@ -344,7 +455,8 @@ def build_agent_graph(config: AgentConfig | None = None) -> Any:
             "finalize": "finalize",
         },
     )
-    graph.add_edge("answer_extension_point", "finalize")
+    graph.add_edge("answer_extension_point", "legal_verification")
+    graph.add_edge("legal_verification", "finalize")
     graph.add_edge("finalize", END)
     return graph
 
