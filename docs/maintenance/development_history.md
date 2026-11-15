@@ -8,7 +8,11 @@ accumulate narrative phase reports.
 | Path | Why |
 |---|---|
 | `config/eval/agent_qa_benchmark_v1.json` | Fixed 50-question benchmark |
+| `config/eval/agent_qa_supplemental_9d1.json` | 9D.1 supplemental + held-out cases |
+| `config/eval/reference_evidence_packets_9d1.json` | Independent reference URL scaffolding |
 | `config/eval/high_risk_legal_review_queue.json` | High-risk legal review state |
+| `data/runs/comparative_answer_eval/` | 9D.1 paired mode results / worksheet |
+| `data/runs/phase_9d1_comparative_answer_evaluation.md` | 9D.1 comparative evaluation report |
 | `config/freshness/source_freshness_policy.json` | Recheck intervals |
 | `config/external/national_official_sources.json` | NL/IE/FR/SG official URL catalog |
 | `data/runs/grounded_qa_eval/baseline_9c1/` | Immutable 9C.1 machine baseline |
