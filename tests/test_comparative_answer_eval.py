@@ -12,7 +12,7 @@ from lifepilot.agent.evidence import (
     EvidenceVerificationState,
 )
 from lifepilot.agent.orchestration import OrchestrationResult
-from lifepilot.eval.comparative import (
+from lifepilot.evaluation.comparative import (
     MODE_SPECS,
     ExternalOnlyEvidenceOrchestrator,
     classify_automated_assessment,

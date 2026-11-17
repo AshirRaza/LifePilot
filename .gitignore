@@ -55,3 +55,7 @@ pytest_*_out.txt
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local historical archives (not part of active source tree)
+archive/
+

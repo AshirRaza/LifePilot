@@ -10,7 +10,7 @@ Official government sources are ingested into a curated knowledge base. The agen
 validate → evidence → generate → verify → respond
 ```
 
-## Release status (Phase 9D.6)
+## Release status
 
 | Gate | Status |
 | --- | --- |
@@ -18,7 +18,7 @@ validate → evidence → generate → verify → respond
 | Private staging deployment | **Ready with limitations** |
 | Public production launch | **Not approved** |
 
-See [`docs/README.md`](docs/README.md) for blockers and documentation index.
+See [`docs/README.md`](docs/README.md) for blockers.
 
 ## Setup
 
@@ -29,22 +29,22 @@ python -m venv .venv
 pip install -r requirements.txt
 docker compose up -d postgres
 $env:PYTHONPATH = "backend"
-python scripts/check_database.py
+python scripts/database/check_database.py
 alembic upgrade head
-python scripts/import_seed_sources.py
+python scripts/database/import_seed_sources.py
 ```
 
-Configuration reference: [`.env.example`](.env.example).
+Configuration: [`.env.example`](.env.example).
 
 ## Core commands
 
 ```powershell
 $env:PYTHONPATH = "backend"
 
-python scripts/ask_lifepilot.py --question "UK Skilled Worker requirements?" --jurisdiction GB
-python scripts/run_agent_evidence.py --question "…" --jurisdiction GB
-python scripts/run_knowledge_maintenance.py --dry-run --limit 10
-python scripts/run_api.py --host 127.0.0.1 --port 8000
+python scripts/operations/ask_lifepilot.py --question "UK Skilled Worker requirements?" --jurisdiction GB
+python scripts/operations/run_agent_evidence.py --question "…" --jurisdiction GB
+python scripts/maintenance/run_knowledge_maintenance.py --dry-run --limit 10
+python scripts/operations/run_api.py --host 127.0.0.1 --port 8000
 pytest -q
 ```
 
@@ -53,17 +53,29 @@ pytest -q
 Endpoints: `POST /v1/answer`, `GET /health`, `GET /ready`, `GET /v1/ops/status` (auth).
 
 ```powershell
-# Host process
 $env:LIFEPILOT_ENV = "production"
 $env:LIFEPILOT_API_REQUIRE_AUTH = "1"
 $env:LIFEPILOT_API_KEYS = "replace_with_long_random_api_key"
-python scripts/run_api.py --host 127.0.0.1 --port 8000
+python scripts/operations/run_api.py --host 127.0.0.1 --port 8000
 
-# Or Compose API profile (Postgres + API; localhost-bound)
+# Or Compose API profile
 docker compose --profile api up -d --build
 ```
 
 `/v1/answer` always uses `external_mode=auto` and unified verification.
+
+## Package map
+
+| Package | Role |
+| --- | --- |
+| `lifepilot.api` | FastAPI boundary |
+| `lifepilot.agent` | LangGraph agent, grounding, verification |
+| `lifepilot.rag` | Chunking, embeddings, internal retrieval |
+| `lifepilot.external` | Official-source connectors |
+| `lifepilot.maintenance` | Freshness recheck / change queue |
+| `lifepilot.operations` | Locks, redaction, readiness |
+| `lifepilot.evaluation` | Shared eval helpers (not production answers) |
+| `lifepilot.db` | SQLAlchemy models/sessions |
 
 ## Documentation
 
@@ -71,16 +83,14 @@ docker compose --profile api up -d --build
 | --- | --- |
 | Docs index | [`docs/README.md`](docs/README.md) |
 | Architecture | [`docs/architecture.md`](docs/architecture.md) |
-| Scripts / eval CLIs | [`scripts/README.md`](scripts/README.md) |
+| Scripts | [`scripts/README.md`](scripts/README.md) |
 | Production ops | [`docs/ops/production.md`](docs/ops/production.md) |
 | Backup & restore | [`docs/ops/backup_restore.md`](docs/ops/backup_restore.md) |
-| Artifact retention | [`docs/maintenance/development_history.md`](docs/maintenance/development_history.md) |
 
 ## Safety
 
 - Only allowlisted HTTPS `approved` sources are fetchable.
 - Automated checks ≠ human legal verification.
-- High-risk pathways with open review queues are restricted for authoritative current-law claims.
 - Confirm current rules on official government sites.
 - Do not commit API keys, `.env` secrets, or database dumps.
-- Known dependency debt: `transformers` CVEs tracked in Phase 9D.6 acceptance — not resolved by cleanup.
+- Known dependency debt: `transformers` CVEs — tracked, not resolved by restructuring.

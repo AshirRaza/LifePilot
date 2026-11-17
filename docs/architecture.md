@@ -17,18 +17,22 @@ Production answering always uses `external_mode=auto` and unified claim-level ve
 | `rag/` | Chunking, embeddings, internal retrieval |
 | `external/` | Official-source connectors, HTTP client, allowlists, caching |
 | `maintenance/` | Freshness recheck, change classification, pending review |
-| `ops/` | Locks, secret redaction, readiness probes |
+| `operations/` | Locks, secret redaction, readiness probes |
 | `db/` | SQLAlchemy models and sessions |
 | `ingest/`, `extract/`, `crawl/`, `registry/` | Corpus acquisition and registry |
 | `coverage/` | Offline corpus/pathway analytics |
-| `eval/` | Shared evaluation helpers (reuse production agent) |
+| `evaluation/` | Shared evaluation helpers (reuse production agent) |
 
-## Deterministic vs LLM
+## Scripts layout
 
-- **Deterministic:** dates, dependencies, pathway attribution checks, claim verification rules, source allowlists, maintenance promotion policy.
-- **LLM:** NLU, document interpretation help, grounded answer drafting and explanations.
-
-LLMs never auto-approve material legal changes or rewrite official thresholds.
+```text
+scripts/
+  operations/     # API, ask, query
+  maintenance/    # KB recheck, ingest, crawl helpers
+  database/       # migrate, import, corpus reliability
+  evaluation/     # grounded QA, verification, performance
+  corpus/         # offline coverage analytics
+```
 
 ## Naming conventions
 
@@ -39,12 +43,16 @@ LLMs never auto-approve material legal changes or rewrite official thresholds.
 | Functions / variables | `snake_case` | `verify_material_claims` |
 | Constants | `UPPER_SNAKE_CASE` | `DEFAULT_EXTERNAL_TIMEOUT` |
 | Env vars | `LIFEPILOT_*` | `LIFEPILOT_VERIFICATION_ENABLED` |
-| Tests | `test_<subsystem>_<behavior>.py` | `test_api_security_9d5.py` |
+| Tests | `test_<behavior>.py` | `test_api_security.py` |
 
-Phase-suffixed historical tests and scripts are retained when renaming would risk breakage without improving clarity.
+## Deterministic vs LLM
+
+- **Deterministic:** dates, pathway attribution, claim verification rules, allowlists, maintenance promotion policy.
+- **LLM:** NLU, grounded answer drafting and explanations.
+
+LLMs never auto-approve material legal changes.
 
 ## Related docs
 
 - Operations: [`ops/production.md`](ops/production.md)
 - Scripts: [`../scripts/README.md`](../scripts/README.md)
-- Acceptance: `data/runs/phase_9d6_final_backend_acceptance_report.md`

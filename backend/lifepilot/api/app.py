@@ -29,8 +29,8 @@ from lifepilot.api.settings import (
 from lifepilot.agent.config import get_agent_config, reset_agent_config_cache
 from lifepilot.agent.contracts import AgentRequest, AgentStatus
 from lifepilot.agent.runner import run_agent
-from lifepilot.ops.health import readiness_payload
-from lifepilot.ops.secrets_redact import redact_secrets
+from lifepilot.operations.health import readiness_payload
+from lifepilot.operations.secrets_redact import redact_secrets
 
 logger = logging.getLogger("lifepilot.api")
 

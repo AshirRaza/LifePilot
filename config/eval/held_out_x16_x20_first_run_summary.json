@@ -1,0 +1,27 @@
+{
+  "stage": "held_out",
+  "status": "completed",
+  "checked_at": "2026-11-17T20:43:47.966067+00:00",
+  "cases_expected": [
+    "X16",
+    "X17",
+    "X18",
+    "X19",
+    "X20"
+  ],
+  "cases_completed": [
+    "X16",
+    "X17",
+    "X18",
+    "X19",
+    "X20"
+  ],
+  "paid_calls": 5,
+  "estimated_cost_usd": 0.110634,
+  "max_cost_usd": 1.5,
+  "note": "Immutable first-run blind acceptance baseline. Do not overwrite. Not independent legal certification.",
+  "heuristic_pass_rates": {
+    "personal_eligibility_ok": 0.8,
+    "verification_present": 1.0
+  }
+}

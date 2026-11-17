@@ -422,7 +422,7 @@ def generate_human_review_packet(
     lines += [
         "---",
         "",
-        "Use `python scripts/run_corpus_reliability.py review ...` to record confirm/reject/investigate.",
+        "Use `python scripts/database/run_corpus_reliability.py review ...` to record confirm/reject/investigate.",
     ]
     return "\n".join(lines)
 

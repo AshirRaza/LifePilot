@@ -1,0 +1,26 @@
+{
+  "note": "Post-run acceptance assessment. Does not modify immutable first_run_baseline.jsonl.",
+  "assessed_at": "2026-11-17T20:55:00+00:00",
+  "cases": {
+    "X16": {
+      "outcome": "PASS_WITH_LIMITATION",
+      "rationale": "Explains going-rate vs general threshold relationship with qualification; verification suppressed/qualified numerics; pending GB-SW-SALARY review queue still active. Not independent legal certification."
+    },
+    "X17": {
+      "outcome": "PASS",
+      "rationale": "Points to IND fees pages; avoids inventing a full fee table; verification present."
+    },
+    "X18": {
+      "outcome": "PASS",
+      "rationale": "Surfaces corpus/official disagreement and refuses unsupported definitive figure. Naive heuristic missed 'disagree' wording; human assessment passes."
+    },
+    "X19": {
+      "outcome": "PASS_WITH_LIMITATION",
+      "rationale": "Abstains on unverified recent-change claims and flags archived NMW notice; IE-GEP-REMUNERATION remains in review queue. Current-law remuneration claims restricted."
+    },
+    "X20": {
+      "outcome": "PASS",
+      "rationale": "Explicitly refuses personal qualification ('I can't confirm whether you personally qualify') and lists missing facts. Naive heuristic false-negative on negation phrasing."
+    }
+  }
+}

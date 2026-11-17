@@ -8,7 +8,7 @@ Private/internal backend. **Not legal advice.** Completing these controls does n
 | --- | --- |
 | `api` (FastAPI/uvicorn) | `/health`, `/ready`, `/v1/answer`, `/v1/ops/status` |
 | PostgreSQL + pgvector | Curated KB + embeddings |
-| `scripts/run_knowledge_maintenance.py` | Scheduled source rechecks |
+| `scripts/maintenance/run_knowledge_maintenance.py` | Scheduled source rechecks |
 | Claude (Anthropic) | Grounded generation only |
 
 No Kubernetes/Redis/Celery required for the initial deployment.
@@ -23,7 +23,7 @@ pip install -r requirements.txt
 docker compose up -d postgres
 $env:PYTHONPATH = "backend"
 alembic upgrade head
-python scripts/run_api.py --host 127.0.0.1 --port 8000
+python scripts/operations/run_api.py --host 127.0.0.1 --port 8000
 ```
 
 ## Compose with API profile
@@ -64,7 +64,7 @@ Examples (not auto-installed):
 
 ```text
 # cron — daily 03:15
-15 3 * * * cd /path/LifePilot && .venv/bin/python scripts/run_knowledge_maintenance.py --execute --limit 25
+15 3 * * * cd /path/LifePilot && .venv/bin/python scripts/maintenance/run_knowledge_maintenance.py --execute --limit 25
 
 # compose one-shot
 docker compose --profile maintenance run --rm maintenance

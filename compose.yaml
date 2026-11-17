@@ -73,7 +73,7 @@ services:
     entrypoint:
       [
         "python",
-        "scripts/run_knowledge_maintenance.py",
+        "scripts/maintenance/run_knowledge_maintenance.py",
         "--execute",
         "--limit",
         "${LIFEPILOT_MAINTENANCE_LIMIT:-25}",

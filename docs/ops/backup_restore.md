@@ -18,7 +18,7 @@ Corpus reliability helper (manifest + optional data archive):
 
 ```powershell
 $env:PYTHONPATH = "backend"
-python scripts/run_corpus_reliability.py --help
+python scripts/database/run_corpus_reliability.py --help
 ```
 
 **Retention recommendation:** keep ≥7 daily dumps and ≥4 weekly dumps off the database volume (object storage or another disk). Encrypt backups at rest when they leave the host.
@@ -32,7 +32,7 @@ docker compose exec postgres psql -U lifepilot -d postgres -c "CREATE DATABASE l
 docker compose exec -T postgres pg_restore -U lifepilot -d lifepilot_restore_test --clean --if-exists /backups/lifepilot_YYYYMMDD.dump
 ```
 
-Then point a temporary `DATABASE_URL` at the restore DB and run `python scripts/check_database.py` / count checks.
+Then point a temporary `DATABASE_URL` at the restore DB and run `python scripts/database/check_database.py` / count checks.
 
 The Python restore guards in `lifepilot.coverage.corpus_reliability.backup` refuse protected database names.
 

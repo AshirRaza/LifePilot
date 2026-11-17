@@ -1,0 +1,167 @@
+{
+  "generated_at": "2026-11-17T21:30:00+00:00",
+  "checkpoint_commit": "9aa8ad47a670b51e2d0c72191c53800c0b44d2c8",
+  "branch": "restructure/production-cleanup",
+  "entries": [
+    {
+      "original_path": "data/runs/phase_9d1_comparative_answer_evaluation.md",
+      "classification": "REMOVE",
+      "reason": "Historical phase narrative; not required for runtime or active tests",
+      "dependency_check": "No production imports; docs updated to drop active links",
+      "recovery_location": "archive/historical_phase_reports/phase_9d1_comparative_answer_evaluation.md"
+    },
+    {
+      "original_path": "data/runs/phase_9d2_unified_legal_verification_report.md",
+      "classification": "REMOVE",
+      "reason": "Historical phase narrative",
+      "dependency_check": "No production imports",
+      "recovery_location": "archive/historical_phase_reports/phase_9d2_unified_legal_verification_report.md"
+    },
+    {
+      "original_path": "data/runs/phase_9d3_verification_reliability_report.md",
+      "classification": "REMOVE",
+      "reason": "Historical phase narrative",
+      "dependency_check": "No production imports",
+      "recovery_location": "archive/historical_phase_reports/phase_9d3_verification_reliability_report.md"
+    },
+    {
+      "original_path": "data/runs/phase_9d4_performance_optimization_report.md",
+      "classification": "REMOVE",
+      "reason": "Historical phase narrative",
+      "dependency_check": "No production imports",
+      "recovery_location": "archive/historical_phase_reports/phase_9d4_performance_optimization_report.md"
+    },
+    {
+      "original_path": "data/runs/phase_9d5_production_reliability_report.md",
+      "classification": "REMOVE",
+      "reason": "Historical phase narrative",
+      "dependency_check": "No production imports",
+      "recovery_location": "archive/historical_phase_reports/phase_9d5_production_reliability_report.md"
+    },
+    {
+      "original_path": "data/runs/phase_9d6_final_backend_acceptance_report.md",
+      "classification": "REMOVE",
+      "reason": "Historical acceptance narrative; compact held-out baseline retained in config/eval",
+      "dependency_check": "No production imports",
+      "recovery_location": "archive/historical_phase_reports/phase_9d6_final_backend_acceptance_report.md"
+    },
+    {
+      "original_path": "data/runs/comparative_answer_eval/",
+      "classification": "REMOVE",
+      "reason": "Bulky historical eval outputs; runners regenerate",
+      "dependency_check": "Not imported by tests",
+      "recovery_location": "archive/historical_phase_reports/comparative_answer_eval/"
+    },
+    {
+      "original_path": "data/runs/grounded_qa_eval/",
+      "classification": "REMOVE",
+      "reason": "Bulky historical eval outputs; immutable 9C.1 baseline archived",
+      "dependency_check": "Not imported by production",
+      "recovery_location": "archive/historical_phase_reports/grounded_qa_eval/"
+    },
+    {
+      "original_path": "data/runs/unified_verification_eval/",
+      "classification": "REMOVE",
+      "reason": "Historical eval outputs",
+      "dependency_check": "Not imported by production",
+      "recovery_location": "archive/historical_phase_reports/unified_verification_eval/"
+    },
+    {
+      "original_path": "data/runs/verification_reliability_eval/",
+      "classification": "REMOVE",
+      "reason": "Historical eval outputs; fixtures remain in config/eval",
+      "dependency_check": "Tests use config fixtures, not this directory",
+      "recovery_location": "archive/historical_phase_reports/verification_reliability_eval/"
+    },
+    {
+      "original_path": "data/runs/verification_reliability_e2e/",
+      "classification": "REMOVE",
+      "reason": "Historical live E2E outputs",
+      "dependency_check": "Not imported by production",
+      "recovery_location": "archive/historical_phase_reports/verification_reliability_e2e/"
+    },
+    {
+      "original_path": "data/runs/performance_optimization_9d4/",
+      "classification": "REMOVE",
+      "reason": "Historical performance outputs",
+      "dependency_check": "Not imported by production",
+      "recovery_location": "archive/historical_phase_reports/performance_optimization_9d4/"
+    },
+    {
+      "original_path": "data/runs/production_reliability_9d5/",
+      "classification": "REMOVE",
+      "reason": "Historical ops evidence directory",
+      "dependency_check": "Not imported by production",
+      "recovery_location": "archive/historical_phase_reports/production_reliability_9d5/"
+    },
+    {
+      "original_path": "data/runs/final_backend_acceptance_9d6/",
+      "classification": "REMOVE",
+      "reason": "Bulky acceptance workspace; compact held-out baseline promoted to config/eval",
+      "dependency_check": "Held-out baseline copied before deletion",
+      "recovery_location": "archive/historical_phase_reports/final_backend_acceptance_9d6/"
+    },
+    {
+      "original_path": "data/runs/corpus_status_report.md",
+      "classification": "REMOVE",
+      "reason": "Regenerable status snapshot",
+      "dependency_check": "Not required by tests",
+      "recovery_location": "archive/historical_phase_reports/ (if copied with phase set; otherwise regenerable)"
+    },
+    {
+      "original_path": "scripts/audit_grounded_answers.py",
+      "classification": "REMOVE",
+      "reason": "Development-only grounding audit CLI superseded by evaluation runners",
+      "dependency_check": "No Docker/cron references",
+      "recovery_location": "archive/obsolete_scripts/audit_grounded_answers.py"
+    },
+    {
+      "original_path": "scripts/write_grounding_audit_report.py",
+      "classification": "REMOVE",
+      "reason": "One-off report generator for completed grounding audits",
+      "dependency_check": "No Docker/cron references",
+      "recovery_location": "archive/obsolete_scripts/write_grounding_audit_report.py"
+    },
+    {
+      "original_path": "scripts/run_final_backend_acceptance_9d6.py",
+      "classification": "REMOVE",
+      "reason": "One-shot acceptance harness; phase complete; evidence archived",
+      "dependency_check": "Not referenced by Compose/Dockerfile",
+      "recovery_location": "archive/obsolete_scripts/run_final_backend_acceptance_9d6.py"
+    },
+    {
+      "original_path": "docs/maintenance/post_9d2_cleanup_report.md",
+      "classification": "REMOVE",
+      "reason": "Historical cleanup narrative; superseded by restructure docs",
+      "dependency_check": "Not linked from primary README index after update",
+      "recovery_location": "archive/historical_phase_reports/post_9d2_cleanup_report.md"
+    },
+    {
+      "original_path": "backend/lifepilot/ops/",
+      "classification": "CONSOLIDATE",
+      "reason": "Renamed to lifepilot.operations for clearer naming",
+      "dependency_check": "Imports rewritten",
+      "recovery_location": "backend/lifepilot/operations/ (git history via checkpoint 9aa8ad4)"
+    },
+    {
+      "original_path": "backend/lifepilot/eval/",
+      "classification": "CONSOLIDATE",
+      "reason": "Renamed to lifepilot.evaluation",
+      "dependency_check": "Imports rewritten",
+      "recovery_location": "backend/lifepilot/evaluation/ (git history via checkpoint 9aa8ad4)"
+    }
+  ],
+  "preserved_operational": [
+    "data/runs/review_packets/",
+    "data/runs/human_review_packets/",
+    "data/runs/knowledge_maintenance/",
+    "data/runs/coverage_matrix.csv",
+    "data/runs/evidence_matrix.csv",
+    "data/runs/backup_manifest.json",
+    "data/runs/blocked_evidence_recoveries.csv",
+    "config/eval/high_risk_legal_review_queue.json",
+    "config/eval/held_out_x16_x20_first_run_baseline.jsonl",
+    "alembic/",
+    "backups/ (gitignored dumps)"
+  ]
+}

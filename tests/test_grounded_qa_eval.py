@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "run_grounded_qa_eval.py"
+SCRIPT = ROOT / "scripts" / "evaluation" / "run_grounded_qa_eval.py"
 BENCHMARK = ROOT / "config" / "eval" / "agent_qa_benchmark_v1.json"
 
 

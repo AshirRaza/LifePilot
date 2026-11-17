@@ -67,7 +67,7 @@ Stable operational, Docker, cron, and import paths were preserved. Organization 
 | Change | Path |
 | --- | --- |
 | Removed unused `statistics` import | `scripts/run_final_backend_acceptance_9d6.py` |
-| Removed redundant `import json as _json` | `scripts/run_knowledge_maintenance.py` |
+| Removed redundant `import json as _json` | `scripts/maintenance/run_knowledge_maintenance.py` |
 | Deleted disposable acceptance scratch helpers | `data/runs/final_backend_acceptance_9d6/_*.py` |
 | Deleted disposable suite logs | `data/runs/_9d6_offline_suite.txt`, `_cleanup_*.txt` |
 | Removed `scripts/__pycache__` | local cache only |
@@ -199,7 +199,7 @@ Cleanup-touched paths include:
 - `docs/maintenance/development_history.md`
 - `docs/maintenance/final_backend_cleanup_report.md` (this file)
 - `scripts/README.md`
-- `scripts/run_knowledge_maintenance.py` (import hygiene)
+- `scripts/maintenance/run_knowledge_maintenance.py` (import hygiene)
 - `scripts/run_final_backend_acceptance_9d6.py` (import hygiene)
 - `backend/lifepilot/api/app.py` (numeric HTTP status aliases)
 
