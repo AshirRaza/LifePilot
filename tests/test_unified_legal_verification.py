@@ -564,3 +564,193 @@ def test_cross_jurisdiction_claim_insufficient():
     )
     assert result.claims == []
     assert result.outcomes[0].status == ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+
+
+def test_distinct_corroboration_path_uses_public_overlap():
+    """Regression: find_distinct_corroboration must not reference private _overlap_ok."""
+    a = _ev(
+        text=(
+            "Skilled Worker visa. The general salary threshold is £41,700 per year "
+            "or the going rate, whichever is higher."
+        ),
+        url="https://www.gov.uk/skilled-worker-visa",
+        jur="GB",
+    )
+    b = _ev(
+        text=(
+            "Skilled Worker visa guidance. The general salary threshold is £41,700 "
+            "per year or the going rate for the occupation, whichever is higher."
+        ),
+        url="https://www.gov.uk/skilled-worker-visa/your-job",
+        jur="GB",
+        chunk_id=2,
+    )
+    claim = AnswerClaim(
+        claim=(
+            "The Skilled Worker general salary threshold is £41,700 per year or "
+            "the going rate, whichever is higher."
+        ),
+        evidence_ids=[a.evidence_id],
+    )
+    result = verify_material_claims(
+        answer=claim.claim,
+        claims=[claim],
+        evidence=[a, b],
+        jurisdiction="GB",
+        pathway_id="gb_skilled_worker",
+        question="What is the Skilled Worker salary threshold?",
+        max_external_corroborations=0,
+    )
+    assert result.outcomes[0].status == ClaimVerificationStatus.SUPPORTED
+    assert result.outcomes[0].independent_corroboration.value in {
+        "reused_retrieval_distinct_source",
+        "not_required",
+        "unavailable",
+    }
+
+
+def test_unmarked_excerpt_numeric_not_false_pathway_mismatch():
+    """9D.3: unmarked excerpts must not suppress correctly grounded numerics."""
+    gb = _ev(
+        text=(
+            "Alpha Visa rules: the general salary threshold is £41,700 per year "
+            "or the going rate for the occupation, whichever is higher."
+        ),
+        url="https://example.test/gb/alpha-visa",
+        jur="GB",
+    )
+    claim = AnswerClaim(
+        claim=(
+            "The Alpha Visa general salary threshold is £41,700 per year or the "
+            "going rate, whichever is higher."
+        ),
+        evidence_ids=[gb.evidence_id],
+    )
+    result = verify_material_claims(
+        answer=claim.claim,
+        claims=[claim],
+        evidence=[gb],
+        jurisdiction="GB",
+        pathway_id="gb_skilled_worker",
+        question="Alpha Visa salary?",
+        max_external_corroborations=0,
+    )
+    assert result.outcomes[0].status == ClaimVerificationStatus.SUPPORTED
+    assert "£41,700" in (result.answer or "")
+
+
+def test_work_rights_unlimited_vs_limited_contradicted():
+    st = _ev(
+        text=(
+            "Student permission: term-time work is limited to 20 hours per week "
+            "for degree-level courses."
+        ),
+        url="https://www.gov.uk/student-visa",
+        jur="GB",
+    )
+    claim = AnswerClaim(
+        claim="Students may work unlimited hours during term time.",
+        evidence_ids=[st.evidence_id],
+    )
+    result = verify_material_claims(
+        answer=claim.claim,
+        claims=[claim],
+        evidence=[st],
+        jurisdiction="GB",
+        pathway_id="gb_student",
+        question="Unlimited work?",
+        max_external_corroborations=0,
+    )
+    assert result.claims == []
+    assert result.outcomes[0].status == ClaimVerificationStatus.CONTRADICTED
+    assert "unlimited" not in (result.answer or "").lower()
+
+
+def test_eligibility_overclaim_suppressed():
+    gb = _ev(
+        text=(
+            "Alpha Visa requires an approved sponsor, a certificate of sponsorship, "
+            "an eligible occupation, and the salary threshold."
+        ),
+        url="https://example.test/gb/alpha-visa",
+        jur="GB",
+    )
+    claim = AnswerClaim(
+        claim="A job offer alone makes an applicant fully eligible for an Alpha Visa.",
+        evidence_ids=[gb.evidence_id],
+    )
+    result = verify_material_claims(
+        answer=claim.claim,
+        claims=[claim],
+        evidence=[gb],
+        jurisdiction="GB",
+        pathway_id="gb_skilled_worker",
+        question="Am I eligible?",
+        max_external_corroborations=0,
+    )
+    assert result.claims == []
+    assert result.outcomes[0].status == ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+    assert "fully eligible" not in (result.answer or "").lower()
+
+
+def test_unsupported_bare_score_not_leaked_in_answer():
+    fr = _ev(
+        text=(
+            "Service Public page on work authorisation. No scoring methodology "
+            "or unpublished notes are described."
+        ),
+        url="https://example.test/fr/autorisation",
+        jur="FR",
+    )
+    claim = AnswerClaim(
+        claim=(
+            "French salarié permits are scored using unpublished Home Office notes "
+            "with a 75-point cutoff."
+        ),
+        evidence_ids=[fr.evidence_id],
+    )
+    result = verify_material_claims(
+        answer=claim.claim,
+        claims=[claim],
+        evidence=[fr],
+        jurisdiction="FR",
+        pathway_id=None,
+        question="Scoring?",
+        max_external_corroborations=0,
+    )
+    assert result.claims == []
+    assert "75" not in (result.answer or "")
+
+
+def test_gap_prose_does_not_reintroduce_suppressed_ie_figure():
+    gep = _ev(
+        text="General Employment Permit minimum annual remuneration of €68,911.",
+        url="https://enterprise.gov.ie/general-employment-permit/",
+    )
+    csep = _ev(
+        text=(
+            "Critical Skills Employment Permit eligibility depends on occupation "
+            "and remuneration. No numeric threshold is stated."
+        ),
+        url="https://enterprise.gov.ie/critical-skills-employment-permit/",
+        chunk_id=2,
+    )
+    claim = AnswerClaim(
+        claim="The Critical Skills Employment Permit minimum is €68,911.",
+        evidence_ids=[gep.evidence_id, csep.evidence_id],
+    )
+    result = verify_material_claims(
+        answer=claim.claim,
+        claims=[claim],
+        evidence=[gep, csep],
+        jurisdiction="IE",
+        pathway_id="ie_critical_skills_employment_permit",
+        question="Critical Skills salary?",
+        missing_information=[
+            "Whether the €68,911 figure is the current official Critical Skills threshold"
+        ],
+        max_external_corroborations=0,
+    )
+    assert result.outcomes[0].status == ClaimVerificationStatus.PATHWAY_MISMATCH
+    assert "€68,911" not in (result.answer or "")
+    assert "68,911" not in (result.answer or "")

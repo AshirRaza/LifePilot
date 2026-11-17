@@ -191,7 +191,15 @@ def number_supported_by_requested_pathway_passage(
         if not passages_with_lit:
             # Literal absent from citations — handled by numeric grounding elsewhere.
             continue
-        if not any(requested in evidence_pathway_signals(item) for item in passages_with_lit):
+        # Locality applies only when passages that carry the figure also carry
+        # pathway signals. Unmarked synthetic/partial excerpts must not be treated
+        # as cross-pathway mismatches (false-positive suppression).
+        signaled = [
+            item for item in passages_with_lit if evidence_pathway_signals(item)
+        ]
+        if not signaled:
+            continue
+        if not any(requested in evidence_pathway_signals(item) for item in signaled):
             return False
     return True
 
@@ -336,16 +344,13 @@ def should_drop_for_pathway(
     *,
     claim: str,
 ) -> bool:
-    """Drop only risky numeric cross-pathway attributions when a pathway is requested."""
+    """Drop only risky numeric cross-pathway attributions when a pathway is requested.
+
+    Lack of pathway markers alone is not a drop — that path caused false-positive
+    suppression of correctly grounded claims on unmarked excerpts. Cross-pathway
+    drops remain when a figure is localized to a different marked pathway page.
+    """
+    del claim  # retained for call-site compatibility
     if result.requested_pathway_id is None:
         return False
-    if result.classification == PathwayApplicability.CROSS_PATHWAY:
-        return True
-    # Ambiguous numeric applicability with no pathway markers in evidence.
-    if (
-        result.classification == PathwayApplicability.INSUFFICIENT
-        and bool(_NUMERIC_RE.search(claim or ""))
-        and result.reason == "no_pathway_markers_in_evidence"
-    ):
-        return True
-    return False
+    return result.classification == PathwayApplicability.CROSS_PATHWAY

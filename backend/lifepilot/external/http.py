@@ -299,6 +299,22 @@ class ExternalHttpClient:
                 else:
                     text_body = response.text
 
+                # Defense-in-depth: reject redirects that leave the allowlist
+                # (httpx follows redirects; request URL alone is not enough).
+                final_url = str(response.url)
+                if not self._host_allowed(final_url):
+                    return HttpResponse(
+                        ok=False,
+                        status_code=response.status_code,
+                        url=url,
+                        final_url=final_url,
+                        error=(
+                            "Redirect target host not in allowed API hosts: "
+                            f"{urlparse(final_url).hostname}"
+                        ),
+                        retrieval_status=RetrievalStatus.BLOCKED,
+                    )
+
                 if cache_key is not None and self.cache is not None:
                     self.cache.set(
                         cache_key,

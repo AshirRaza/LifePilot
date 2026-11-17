@@ -2,23 +2,83 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
-
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
+      - ./backups:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    profiles: ["api"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LIFEPILOT_ENV: ${LIFEPILOT_ENV:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LIFEPILOT_LLM_PROVIDER: ${LIFEPILOT_LLM_PROVIDER:-anthropic}
+      LIFEPILOT_LLM_MODEL: ${LIFEPILOT_LLM_MODEL:-claude-sonnet-5-5}
+      LIFEPILOT_API_REQUIRE_AUTH: ${LIFEPILOT_API_REQUIRE_AUTH:-1}
+      LIFEPILOT_API_KEYS: ${LIFEPILOT_API_KEYS:-}
+      LIFEPILOT_API_RATE_LIMIT_PER_MINUTE: ${LIFEPILOT_API_RATE_LIMIT_PER_MINUTE:-30}
+      LIFEPILOT_API_MAX_CONCURRENT_ANSWERS: ${LIFEPILOT_API_MAX_CONCURRENT_ANSWERS:-4}
+      LIFEPILOT_VERIFICATION_ENABLED: ${LIFEPILOT_VERIFICATION_ENABLED:-1}
+      LIFEPILOT_VERIFICATION_MAX_EXTERNAL: ${LIFEPILOT_VERIFICATION_MAX_EXTERNAL:-0}
+      LIFEPILOT_EXTERNAL_HTTP_CACHE_TTL_SECONDS: ${LIFEPILOT_EXTERNAL_HTTP_CACHE_TTL_SECONDS:-900}
+      LIFEPILOT_LLM_INPUT_COST_PER_MTOK: ${LIFEPILOT_LLM_INPUT_COST_PER_MTOK:-2}
+      LIFEPILOT_LLM_OUTPUT_COST_PER_MTOK: ${LIFEPILOT_LLM_OUTPUT_COST_PER_MTOK:-10}
+    ports:
+      - "127.0.0.1:${LIFEPILOT_API_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    stop_grace_period: 30s
+
+  # Optional one-shot / cron-style maintenance worker (profile: maintenance).
+  maintenance:
+    profiles: ["maintenance"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      LIFEPILOT_ENV: ${LIFEPILOT_ENV:-production}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    entrypoint:
+      [
+        "python",
+        "scripts/run_knowledge_maintenance.py",
+        "--execute",
+        "--limit",
+        "${LIFEPILOT_MAINTENANCE_LIMIT:-25}",
+      ]
+    restart: "no"
 
 volumes:
   postgres_data:

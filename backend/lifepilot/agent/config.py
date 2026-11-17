@@ -66,6 +66,10 @@ class AgentConfig:
     # max_external=0 reuses already-retrieved evidence only (no extra connector calls).
     verification_max_external_corroborations: int = 0
     verification_enabled: bool = True
+    # Short-TTL HTTP cache for official connector GETs (not answer caching).
+    # 0 disables. Default 15 minutes — well below salary/fee recheck windows.
+    external_http_cache_ttl_seconds: float = 900.0
+    external_http_disk_cache: bool = True
 
     @property
     def llm_configured(self) -> bool:
@@ -108,6 +112,13 @@ def get_agent_config() -> AgentConfig:
             0, _env_int("LIFEPILOT_VERIFICATION_MAX_EXTERNAL", 0)
         ),
         verification_enabled=_env_bool("LIFEPILOT_VERIFICATION_ENABLED", True),
+        external_http_cache_ttl_seconds=max(
+            0.0,
+            _env_float("LIFEPILOT_EXTERNAL_HTTP_CACHE_TTL_SECONDS", 900.0),
+        ),
+        external_http_disk_cache=_env_bool(
+            "LIFEPILOT_EXTERNAL_HTTP_DISK_CACHE", True
+        ),
     )
 
 

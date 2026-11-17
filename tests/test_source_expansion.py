@@ -626,6 +626,8 @@ def test_compose_audit_distinguishes_named_volume_from_host_data():
     assert info["present"]
     assert "postgres_data" in info["named_volumes_declared"]
     assert any(v.startswith("postgres_data:") for v in info["named_volume_mounts"])
+    # Host ./data may mount into api/maintenance, but never into Postgres.
+    assert info["raw_data_dir_mounted_in_postgres"] is False
     assert info["raw_data_dir_mounted_in_any_container"] is False
 
 

@@ -625,17 +625,32 @@ class EvidenceOrchestrator:
         if self._external_router is not None:
             return self._external_router
         timeout = float(self.config.external_timeout_seconds)
+        ttl = float(self.config.external_http_cache_ttl_seconds or 0.0)
+        cache = None
+        enable_disk = False
+        if ttl > 0:
+            from lifepilot.external.cache import ResponseCache
+            from lifepilot.external.router import DEFAULT_CACHE_DIR
+
+            enable_disk = bool(self.config.external_http_disk_cache)
+            cache = ResponseCache(
+                default_ttl_seconds=ttl,
+                disk_dir=DEFAULT_CACHE_DIR if enable_disk else None,
+            )
         http = ExternalHttpClient(
             config=HttpClientConfig(
                 timeout_seconds=timeout,
                 max_retries=2,
             ),
-            cache=None,
+            cache=cache,
             allowed_hosts=ALL_ALLOWED_HOSTS,
         )
+        # Attach the same cache object the HTTP client uses so connector
+        # use_cache=True hits actually work (router-only cache was previously unused).
         self._external_router = ExternalKnowledgeRouter(
             http=http,
-            enable_disk_cache=False,
+            cache=cache,
+            enable_disk_cache=enable_disk,
         )
         self._owns_router = True
         return self._external_router

@@ -37,6 +37,7 @@ from lifepilot.agent.pathway_applicability import (
     detect_pathway_ids,
     evidence_pathway_signals,
     has_explicit_comparison_language,
+    normalize_numeric_literal,
     numeric_literals_in_text,
     passage_contains_literal,
     should_drop_for_pathway,
@@ -64,6 +65,32 @@ _FUTURE_RE = re.compile(
     r"from\s+\d{1,2}\s+\w+\s+20\d{2}|with effect from|coming into force|"
     r"will apply from|effective from\s+20\d{2}|starting\s+20\d{2}"
     r")\b"
+)
+_ELIGIBILITY_OVERCLAIM_RE = re.compile(
+    r"(?i)\b("
+    r"fully eligible|guaranteed (approval|eligibility)|"
+    r"job offer alone makes .+ eligible|"
+    r"salary threshold alone is enough|"
+    r"automatically approved|definitely eligible"
+    r")\b"
+)
+# Bare material numbers (points, hours, fees without currency) for drop/scrub.
+_MATERIAL_BARE_NUM_RE = re.compile(
+    r"(?i)(?<![£$€])\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b(?!\s*%)"
+)
+_POLAR_CONFLICTS: tuple[tuple[re.Pattern[str], re.Pattern[str]], ...] = (
+    (
+        re.compile(r"(?i)\bunlimited\b"),
+        re.compile(r"(?i)\b(limited|maximum|no more than|up to\s+\d+)\b"),
+    ),
+    (
+        re.compile(r"(?i)\b(no\s+(?:cap|limit)|without\s+(?:a\s+)?limit)\b"),
+        re.compile(r"(?i)\b(limited|maximum|cap(?:ped)?|no more than)\b"),
+    ),
+    (
+        re.compile(r"(?i)\b(always\s+allowed|unrestricted)\b"),
+        re.compile(r"(?i)\b(prohibited|not\s+permitted|restricted|limited)\b"),
+    ),
 )
 
 
@@ -189,9 +216,23 @@ def find_distinct_corroboration(
             continue
         if requested and requested not in evidence_pathway_signals(item):
             continue
-        if not _overlap_ok(claim, [item.passage_text or ""]):
+        if not claim_passage_overlap_ok(claim, [item.passage_text or ""]):
             continue
         return item
+    return None
+
+
+def _claim_polar_conflict(claim: str, passages: list[str]) -> str | None:
+    """Detect hard antonym conflicts (e.g. unlimited vs limited hours)."""
+    blob = " ".join(passages or [])
+    if not claim or not blob:
+        return None
+    for claim_pat, evidence_pat in _POLAR_CONFLICTS:
+        if claim_pat.search(claim) and evidence_pat.search(blob):
+            # Claim itself already acknowledges the restrictive wording → not a conflict.
+            if evidence_pat.search(claim):
+                continue
+            return "polar_conflict_with_cited_passage"
     return None
 
 
@@ -206,40 +247,60 @@ def _claim_conflicts_with_evidence(
     }
     if not claim_amounts:
         return None
-    # Conflict only when another cited/all passage explicitly negates or states a
-    # different figure for the same pathway markers as the claim.
+    exclusive = bool(re.search(r"(?i)\b(only|must be|is exactly|always)\b", claim))
     claim_paths = set(detect_pathway_ids(claim))
+
+    claim_frames_historical = bool(
+        re.search(
+            r"(?i)\b(previously|former(ly)?|historical|no longer applies|until|before)\b",
+            claim or "",
+        )
+    )
+    # Cited passage says the claimed amount does not apply / is incorrect.
+    for item in cited:
+        text = item.passage_text or ""
+        if (
+            any(passage_contains_literal(text, a) for a in claim_amounts)
+            and re.search(
+                r"(?i)\b(does not apply|no longer|incorrect|not\s+the\s+threshold)\b",
+                text,
+            )
+            and not claim_frames_historical
+        ):
+            return "cited_passage_rejects_claimed_amount"
+        other = {
+            re.sub(r"[\s,]", "", m) for m in _CONFLICT_AMOUNT_RE.findall(text)
+        }
+        if exclusive and other and not (claim_amounts & other):
+            return "conflicting_official_amount_in_cited_passage"
+
+    # Broader corpus: same pathway markers, different exclusive figure.
     for item in all_evidence:
         text = item.passage_text or ""
         item_paths = set(evidence_pathway_signals(item))
         if claim_paths and item_paths and claim_paths.isdisjoint(item_paths):
             continue
-        if not any(passage_contains_literal(text, a) for a in claim_amounts):
-            # Different amount on overlapping pathway → soft conflict signal
-            other = {
-                re.sub(r"[\s,]", "", m) for m in _CONFLICT_AMOUNT_RE.findall(text)
-            }
-            if (
-                other
-                and claim_paths
-                and item_paths
-                and (claim_paths & item_paths)
-                and not (claim_amounts & other)
-            ):
-                # Same pathway, different figure present — only contradicted if
-                # claim asserts exclusivity without acknowledging alternatives.
-                if re.search(r"(?i)\b(only|must be|is exactly|always)\b", claim):
-                    return "conflicting_official_amount_on_same_pathway"
-    # Direct contradiction language in cited passages against claim amount.
-    for item in cited:
-        text = item.passage_text or ""
-        if re.search(r"(?i)\b(not|no longer|incorrect|does not apply)\b", text):
-            if claim_amounts and not any(
-                passage_contains_literal(text, a) for a in claim_amounts
-            ):
-                # Passage rejects something else — not enough alone.
-                continue
+        if any(passage_contains_literal(text, a) for a in claim_amounts):
+            continue
+        other = {
+            re.sub(r"[\s,]", "", m) for m in _CONFLICT_AMOUNT_RE.findall(text)
+        }
+        if not other or (claim_amounts & other):
+            continue
+        pathway_aligned = (
+            (claim_paths and item_paths and bool(claim_paths & item_paths))
+            or (not claim_paths and not item_paths)
+        )
+        if exclusive and pathway_aligned:
+            return "conflicting_official_amount_on_same_pathway"
     return None
+
+
+def _claim_has_material_number(claim: str) -> bool:
+    """True when a claim asserts a material numeric that should not leak if unsupported."""
+    if numeric_literals_in_text(claim):
+        return True
+    return bool(_MATERIAL_BARE_NUM_RE.search(claim or ""))
 
 
 def _temporal_status_for_claim(
@@ -269,6 +330,102 @@ def _temporal_status_for_claim(
         if numeric_literals_in_text(claim) or detect_high_risk_categories(claim):
             return ClaimVerificationStatus.TEMPORAL_UNCERTAINTY
     return None
+
+
+def _suppressed_numeric_literals(
+    suppressed_claims: list[str], retained: list[AnswerClaim]
+) -> list[str]:
+    """Numerics that appear only in suppressed claims (not in retained claims)."""
+    kept_blob = " ".join(c.claim for c in retained)
+    kept_compact = normalize_numeric_literal(kept_blob)
+    out: list[str] = []
+    seen: set[str] = set()
+    for claim in suppressed_claims:
+        literals = list(numeric_literals_in_text(claim))
+        for m in _MATERIAL_BARE_NUM_RE.finditer(claim or ""):
+            literals.append(m.group(0))
+        for lit in literals:
+            compact = normalize_numeric_literal(lit)
+            if not compact or compact in kept_compact:
+                continue
+            if compact in seen:
+                continue
+            # Skip lone calendar years that are common prose noise.
+            if re.fullmatch(r"(?:19|20)\d{2}", compact):
+                continue
+            seen.add(compact)
+            out.append(lit)
+    return out
+
+
+def _scrub_suppressed_numerics_from_text(text: str, literals: list[str]) -> str:
+    """Remove gap/uncertainty sentences that reintroduce suppressed numerics."""
+    if not text or not literals:
+        return text
+    compact_lits = [normalize_numeric_literal(x) for x in literals if x]
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept_parts: list[str] = []
+    for part in parts:
+        compact = normalize_numeric_literal(part)
+        if any(lit and lit in compact for lit in compact_lits):
+            # Drop only when this looks like a gap / uncertainty echo.
+            if re.search(
+                r"(?i)\b("
+                r"important gaps remain|whether|confirm|unconfirmed|"
+                r"not clearly|should be checked|before relying|"
+                r"uncertainty|missing information"
+                r")\b",
+                part,
+            ) or re.search(r"(?i)important gaps remain", text):
+                # If the whole answer has a gaps section, scrub the literal from the part.
+                cleaned = part
+                for lit in literals:
+                    cleaned = re.sub(re.escape(lit), "[figure omitted]", cleaned, flags=re.I)
+                # Prefer dropping gap clauses that exist only to echo the figure.
+                if re.search(r"(?i)whether.+threshold|whether.+figure|secret .+deposit", cleaned):
+                    continue
+                part = cleaned
+        kept_parts.append(part)
+    rebuilt = " ".join(p for p in kept_parts if p and p.strip())
+    # Also scrub remaining literal occurrences in gap blocks.
+    for lit in literals:
+        if normalize_numeric_literal(lit) and normalize_numeric_literal(lit) in normalize_numeric_literal(
+            rebuilt
+        ):
+            # Only scrub outside retained factual sentences: replace in "Important gaps" segment.
+            if "Important gaps remain:" in rebuilt:
+                head, sep, tail = rebuilt.partition("Important gaps remain:")
+                for item in literals:
+                    tail = re.sub(re.escape(item), "an unconfirmed figure", tail, flags=re.I)
+                rebuilt = head + sep + tail
+    return rebuilt.strip()
+
+
+def _scrub_missing_information(
+    missing: list[str], literals: list[str]
+) -> list[str]:
+    if not literals:
+        return missing
+    cleaned: list[str] = []
+    for item in missing:
+        compact = normalize_numeric_literal(item)
+        if any(normalize_numeric_literal(lit) in compact for lit in literals if lit):
+            # Replace with a non-numeric gap description.
+            cleaned.append(
+                "Confirmation of the applicable official numerical requirement "
+                "from the correct pathway page"
+            )
+            continue
+        cleaned.append(item)
+    # Deduplicate while preserving order.
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in cleaned:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
 
 
 def verify_material_claims(
@@ -352,7 +509,10 @@ def verify_material_claims(
         revised_uncertainty = claim.uncertainty
         corroboration = IndependentCorroboration.NOT_REQUIRED
 
-        if should_drop_for_pathway(pathway_result, claim=claim.claim):
+        if _ELIGIBILITY_OVERCLAIM_RE.search(claim.claim):
+            status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+            reasons.append("eligibility_overclaim_without_verified_personal_facts")
+        elif should_drop_for_pathway(pathway_result, claim=claim.claim):
             status = ClaimVerificationStatus.PATHWAY_MISMATCH
             reasons.append(
                 f"pathway:{pathway_result.classification.value}:{pathway_result.reason}"
@@ -360,19 +520,40 @@ def verify_material_claims(
         elif pathway_result.classification == PathwayApplicability.CROSS_PATHWAY:
             status = ClaimVerificationStatus.PATHWAY_MISMATCH
             reasons.append(pathway_result.reason)
-        elif not claim_passage_overlap_ok(claim.claim, passages):
-            status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
-            reasons.append("insufficient_passage_overlap")
-        elif not claim_numeric_literals_supported(claim.claim, passages):
-            status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
-            reasons.append("numeric_literal_not_in_passage")
         else:
-            conflict = _claim_conflicts_with_evidence(
-                claim.claim, cited, working_evidence
-            )
-            if conflict:
-                status = ClaimVerificationStatus.CONTRADICTED
-                reasons.append(conflict)
+            # Temporal gates first for dated numeric claims so future/historical
+            # figures are not lost to weak lexical overlap on acronym-heavy excerpts.
+            early_temporal = None
+            if numeric_literals_in_text(claim.claim) and claim_numeric_literals_supported(
+                claim.claim, passages
+            ):
+                early_temporal = _temporal_status_for_claim(
+                    claim.claim,
+                    cited,
+                    future_effective_present=future_effective,
+                    review_reasons=review_reasons,
+                )
+            if early_temporal is not None:
+                status = early_temporal
+                reasons.append("temporal_or_pending_change_uncertainty")
+            elif not claim_passage_overlap_ok(claim.claim, passages):
+                status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+                reasons.append("insufficient_passage_overlap")
+            elif not claim_numeric_literals_supported(claim.claim, passages):
+                status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+                reasons.append("numeric_literal_not_in_passage")
+            else:
+                polar = _claim_polar_conflict(claim.claim, passages)
+                if polar:
+                    status = ClaimVerificationStatus.CONTRADICTED
+                    reasons.append(polar)
+                else:
+                    conflict = _claim_conflicts_with_evidence(
+                        claim.claim, cited, working_evidence
+                    )
+                    if conflict:
+                        status = ClaimVerificationStatus.CONTRADICTED
+                        reasons.append(conflict)
 
         if status is None:
             temporal = _temporal_status_for_claim(
@@ -473,9 +654,14 @@ def verify_material_claims(
                             "Cited figure/rule may relate to a different pathway; "
                             "not treated as a confirmed requirement for the requested pathway."
                         )
-            elif pathway_result.classification == PathwayApplicability.INSUFFICIENT and (
-                pathway_id and numeric_literals_in_text(claim.claim)
+            elif (
+                pathway_result.classification == PathwayApplicability.INSUFFICIENT
+                and pathway_id
+                and numeric_literals_in_text(claim.claim)
+                and pathway_result.reason != "no_pathway_markers_in_evidence"
             ):
+                # Incomplete pathway markers for comparison/locality — abstain.
+                # Unmarked excerpts fall through to supported after grounding checks.
                 status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
                 reasons.append(pathway_result.reason or "pathway_markers_insufficient")
             else:
@@ -497,13 +683,26 @@ def verify_material_claims(
             retained_flag = False
             suppressed.append(claim.claim)
         elif status == ClaimVerificationStatus.INSUFFICIENT_EVIDENCE:
-            # Drop unsupported exact figures; keep qualitative uncertainty via missing.
-            if numeric_literals_in_text(claim.claim):
+            # Drop unsupported exact figures and eligibility overclaims; keep soft
+            # qualitative uncertainty only when the claim has no material number.
+            drop_insufficient = (
+                _claim_has_material_number(claim.claim)
+                or "eligibility_overclaim_without_verified_personal_facts" in reasons
+            )
+            if drop_insufficient:
                 retained_flag = False
                 suppressed.append(claim.claim)
-                gap = "confirmation of unsupported numerical requirement"
-                if gap not in missing:
-                    missing.append(gap)
+                if _claim_has_material_number(claim.claim):
+                    gap = "confirmation of unsupported numerical requirement"
+                    if gap not in missing:
+                        missing.append(gap)
+                elif "eligibility_overclaim_without_verified_personal_facts" in reasons:
+                    gap = (
+                        "personal facts and full eligibility conditions required "
+                        "before any eligibility conclusion"
+                    )
+                    if gap not in missing:
+                        missing.append(gap)
             else:
                 retained_flag = True
                 if not revised_uncertainty:
@@ -543,6 +742,10 @@ def verify_material_claims(
             )
 
     elapsed = (time.perf_counter() - started) * 1000
+    suppressed_nums = _suppressed_numeric_literals(suppressed, retained)
+    if suppressed_nums:
+        missing = _scrub_missing_information(missing, suppressed_nums)
+
     new_answer, _ = compose_grounded_answer_text(
         answer or "",
         retained,
@@ -562,6 +765,13 @@ def verify_material_claims(
         )
     else:
         status_hint = None
+
+    if suppressed_nums:
+        new_answer = _scrub_suppressed_numerics_from_text(new_answer, suppressed_nums)
+        warnings.append(
+            "verification_scrubbed_suppressed_numerics_from_prose:"
+            + str(len(suppressed_nums))
+        )
 
     if suppressed:
         warnings.append(f"verification_suppressed_claims:{len(suppressed)}")

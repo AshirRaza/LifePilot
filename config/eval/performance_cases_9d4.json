@@ -1,0 +1,16 @@
+{
+  "version": "9d4.1",
+  "description": "Phase 9D.4 paired performance cases. Excludes held-out X16–X20.",
+  "cases": [
+    {"id": "F07", "category": "cross_pathway", "source": "benchmark"},
+    {"id": "X05", "category": "high_risk_salary", "source": "supplemental"},
+    {"id": "X06", "category": "cross_pathway", "source": "supplemental"},
+    {"id": "E15", "category": "eligibility", "source": "benchmark"},
+    {"id": "X01", "category": "high_risk_salary", "source": "supplemental"},
+    {"id": "X02", "category": "application_fee", "source": "supplemental"},
+    {"id": "X03", "category": "work_rights", "source": "supplemental"},
+    {"id": "X04", "category": "high_risk_salary", "source": "supplemental"},
+    {"id": "F01", "category": "general_guidance", "source": "benchmark"},
+    {"id": "S05", "category": "eligibility", "source": "benchmark"}
+  ]
+}

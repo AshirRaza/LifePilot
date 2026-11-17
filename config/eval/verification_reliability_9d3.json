@@ -1,0 +1,2625 @@
+{
+  "suite_id": "verification_reliability_9d3",
+  "version": "1.0",
+  "notes": [
+    "Synthetic fixtures use stipulated rules; they do not assert real-world law.",
+    "real_official fixtures use official hosts/captured-style wording for structural tests.",
+    "Figures in real_official fixtures are not independently human-verified as current.",
+    "Do not tune against held-out X16–X20."
+  ],
+  "fixtures": [
+    {
+      "id": "SYN-001",
+      "kind": "synthetic",
+      "category": "correct_salary",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "What is the Alpha Visa salary threshold?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa rules: the general salary threshold is £41,700 per year or the going rate for the occupation, whichever is higher.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa general salary threshold is £41,700 per year or the going rate, whichever is higher.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa general salary threshold is £41,700 per year or the going rate, whichever is higher.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "£41,700"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-002",
+      "kind": "synthetic",
+      "category": "correct_salary",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "question": "What is the under-30 salary criterion?",
+      "evidence": [
+        {
+          "passage_text": "Highly skilled migrant: for applicants under 30 the monthly salary criterion is €2,801 excluding holiday allowance.",
+          "source_url": "https://example.test/nl/hsm",
+          "jurisdiction": "NL",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "For highly skilled migrants under 30 the monthly salary criterion is €2,801 excluding holiday allowance.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "For highly skilled migrants under 30 the monthly salary criterion is €2,801 excluding holiday allowance.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "€2,801"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-003",
+      "kind": "synthetic",
+      "category": "incorrect_salary",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Alpha Visa salary?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa rules: the general salary threshold is £41,700 per year.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa general salary threshold is £99,999 per year.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa general salary threshold is £99,999 per year.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "£99,999"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-004",
+      "kind": "synthetic",
+      "category": "incorrect_salary",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills salary?",
+      "evidence": [
+        {
+          "passage_text": "Critical Skills Employment Permit: remuneration must be at least €38,000 for some Critical Skills occupations.",
+          "source_url": "https://example.test/ie/critical-skills-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Critical Skills Employment Permit minimum remuneration is €12,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Critical Skills Employment Permit minimum remuneration is €12,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€12,000"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-005",
+      "kind": "synthetic",
+      "category": "wrong_pathway_attribution",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills remuneration?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permit remuneration criteria. Minimum annual remuneration of €68,911 for eligible employment.",
+          "source_url": "https://example.test/ie/general-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 201,
+          "document_version_id": 1201,
+          "chunk_id": 1,
+          "provider": null
+        },
+        {
+          "passage_text": "Critical Skills Employment Permit eligibility depends on occupation type and proposed remuneration level.",
+          "source_url": "https://example.test/ie/critical-skills-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 202,
+          "document_version_id": 1202,
+          "chunk_id": 2,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Critical Skills Employment Permit minimum annual remuneration is €68,911.",
+          "evidence_index": [
+            0,
+            1
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Critical Skills Employment Permit minimum annual remuneration is €68,911.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "pathway_mismatch"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€68,911"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-006",
+      "kind": "synthetic",
+      "category": "wrong_pathway_attribution",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills pay?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permit minimum annual remuneration of €32,691.",
+          "source_url": "https://example.test/ie/general-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Critical Skills Employment Permit threshold is €32,691.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Critical Skills Employment Permit threshold is €32,691.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "pathway_mismatch"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€32,691"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-007",
+      "kind": "synthetic",
+      "category": "valid_pathway_comparison",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Compare Critical Skills and GEP pay?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permit remuneration criteria include thresholds of €32,691. Critical Skills Employment Permit is a different permit type.",
+          "source_url": "https://example.test/ie/general-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Unlike the Critical Skills Employment Permit, the General Employment Permit has a separate remuneration threshold of €32,691.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Unlike the Critical Skills Employment Permit, the General Employment Permit has a separate remuneration threshold of €32,691.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "€32,691"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-008",
+      "kind": "synthetic",
+      "category": "valid_pathway_comparison",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_general_employment_permit",
+      "question": "How do GEP and Critical Skills differ?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permits and Critical Skills Employment Permits are distinct permit types with separate remuneration rules. General Employment Permit threshold example: €34,009.",
+          "source_url": "https://example.test/ie/general-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "General Employment Permits and Critical Skills Employment Permits are distinct permit types; the General Employment Permit has a remuneration threshold of €34,009.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "General Employment Permits and Critical Skills Employment Permits are distinct permit types; the General Employment Permit has a remuneration threshold of €34,009.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-009",
+      "kind": "synthetic",
+      "category": "wrong_jurisdiction",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Ireland salary?",
+      "evidence": [
+        {
+          "passage_text": "Skilled Worker visa general minimum salary is £41,700.",
+          "source_url": "https://www.gov.uk/skilled-worker-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Ireland Critical Skills uses the UK Skilled Worker threshold of £41,700.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Ireland Critical Skills uses the UK Skilled Worker threshold of £41,700.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "£41,700"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-010",
+      "kind": "synthetic",
+      "category": "wrong_jurisdiction",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "question": "NL HSM salary?",
+      "evidence": [
+        {
+          "passage_text": "US H-1B specialty occupation wages vary by location.",
+          "source_url": "https://example.test/us/h1b",
+          "jurisdiction": "US",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Dutch highly skilled migrant salary is $60,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Dutch highly skilled migrant salary is $60,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "$60,000"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-011",
+      "kind": "synthetic",
+      "category": "fabricated_fee",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Application fee?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa page describes eligibility and sponsorship. Fee table is not included in this excerpt.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa application fee is exactly £1,234.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa application fee is exactly £1,234.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "£1,234"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-012",
+      "kind": "synthetic",
+      "category": "correct_fee",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Fee from outside UK?",
+      "evidence": [
+        {
+          "passage_text": "Fees: applying for an Alpha Visa from outside the UK costs £719 for up to 3 years.",
+          "source_url": "https://example.test/gb/alpha-visa-fees",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Applying for an Alpha Visa from outside the UK costs £719 for up to 3 years.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Applying for an Alpha Visa from outside the UK costs £719 for up to 3 years.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "£719"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-013",
+      "kind": "synthetic",
+      "category": "fee_missing_conditions",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "What is the fee?",
+      "evidence": [
+        {
+          "passage_text": "Fees: applying from outside the UK costs £719 for up to 3 years. A higher fee applies for longer permission. Healthcare surcharge is charged separately.",
+          "source_url": "https://example.test/gb/alpha-visa-fees",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Applying for an Alpha Visa from outside the UK costs £719.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Applying for an Alpha Visa from outside the UK costs £719.",
+      "missing_information": [
+        "Whether the permission length is up to 3 years",
+        "Whether the healthcare surcharge applies in addition"
+      ],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-014",
+      "kind": "synthetic",
+      "category": "future_effective",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Current salary threshold?",
+      "evidence": [
+        {
+          "passage_text": "From 1 April 2027 the Alpha Visa general salary threshold will be £50,000. Do not treat the future figure as currently applicable.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The current Alpha Visa general salary threshold is £50,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The current Alpha Visa general salary threshold is £50,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "temporal_uncertainty"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-015",
+      "kind": "synthetic",
+      "category": "future_effective",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "When does the new threshold apply?",
+      "evidence": [
+        {
+          "passage_text": "With effect from 1 January 2028, the maintenance funds rule will require £2,000.",
+          "source_url": "https://example.test/gb/student",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Student maintenance funds requirement is currently £2,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Student maintenance funds requirement is currently £2,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "temporal_uncertainty"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-016",
+      "kind": "synthetic",
+      "category": "historical_as_current",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Current salary?",
+      "evidence": [
+        {
+          "passage_text": "Previously the Alpha Visa threshold was £26,200. That historical figure no longer applies under current guidance.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa salary threshold is £26,200.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa salary threshold is £26,200.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "temporal_uncertainty"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-017",
+      "kind": "synthetic",
+      "category": "correct_historical",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "What was the former threshold?",
+      "evidence": [
+        {
+          "passage_text": "Previously the Alpha Visa threshold was £26,200. That historical figure no longer applies under current guidance.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Previously the Alpha Visa threshold was £26,200 and that historical figure no longer applies.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Previously the Alpha Visa threshold was £26,200 and that historical figure no longer applies.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "£26,200"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-018",
+      "kind": "synthetic",
+      "category": "eligibility_exception",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Are there exceptions?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa: lower salary rules may apply if extending an existing visa or working in listed healthcare occupations, subject to conditions.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Lower Alpha Visa salary rules may apply when extending an existing visa or for listed healthcare occupations, subject to conditions.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Lower Alpha Visa salary rules may apply when extending an existing visa or for listed healthcare occupations, subject to conditions.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-019",
+      "kind": "synthetic",
+      "category": "work_rights",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Can students work?",
+      "evidence": [
+        {
+          "passage_text": "Student permission: term-time work is limited to 20 hours per week for degree-level courses unless the condition says otherwise.",
+          "source_url": "https://example.test/gb/student",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Student permission generally limits term-time work to 20 hours per week for degree-level courses unless the condition says otherwise.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Student permission generally limits term-time work to 20 hours per week for degree-level courses unless the condition says otherwise.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "20 hours"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-020",
+      "kind": "synthetic",
+      "category": "work_rights",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Unlimited work?",
+      "evidence": [
+        {
+          "passage_text": "Student permission: term-time work is limited to 20 hours per week for degree-level courses.",
+          "source_url": "https://example.test/gb/student",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Students may work unlimited hours during term time.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Students may work unlimited hours during term time.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "contradicted"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "unlimited"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-021",
+      "kind": "synthetic",
+      "category": "contradictory_passages",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Salary?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa general salary threshold is £41,700.",
+          "source_url": "https://example.test/gb/alpha-a",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 301,
+          "document_version_id": 1301,
+          "chunk_id": 1,
+          "provider": null
+        },
+        {
+          "passage_text": "Alpha Visa general salary threshold is exactly £38,700 only; £41,700 does not apply.",
+          "source_url": "https://example.test/gb/alpha-b",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 302,
+          "document_version_id": 1302,
+          "chunk_id": 2,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa general salary threshold is only exactly £41,700.",
+          "evidence_index": [
+            0,
+            1
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa general salary threshold is only exactly £41,700.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "contradicted"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-022",
+      "kind": "synthetic",
+      "category": "incomplete_evidence",
+      "jurisdiction": "FR",
+      "pathway_id": "fr_passeport_talent",
+      "question": "What are all Talent card categories?",
+      "evidence": [
+        {
+          "passage_text": "Carte talent is a multi-year residence permit. Full category definitions are not included in this excerpt.",
+          "source_url": "https://example.test/fr/carte-talent",
+          "jurisdiction": "FR",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The carte talent has exactly twelve categories with fixed fees of €500 each.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The carte talent has exactly twelve categories with fixed fees of €500 each.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€500"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-023",
+      "kind": "synthetic",
+      "category": "incomplete_evidence",
+      "jurisdiction": "SG",
+      "pathway_id": "sg_employment_pass",
+      "question": "Qualifying salary?",
+      "evidence": [
+        {
+          "passage_text": "Employment Pass overview page. Qualifying salary details are not stated in this excerpt.",
+          "source_url": "https://example.test/sg/ep",
+          "jurisdiction": "SG",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Employment Pass qualifying salary is S$5,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Employment Pass qualifying salary is S$5,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "S$5,000",
+        "5000"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-024",
+      "kind": "synthetic",
+      "category": "qualified_uncertainty",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Exact fee?",
+      "evidence": [
+        {
+          "passage_text": "Fee information depends on location and length; consult the fee table for the applicable amount.",
+          "source_url": "https://example.test/gb/fees",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Official fee guidance indicates the amount depends on location and length; the exact figure is not stated in the retrieved excerpt.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": "Exact fee not in excerpt"
+        }
+      ],
+      "raw_answer": "Official fee guidance indicates the amount depends on location and length; the exact figure is not stated in the retrieved excerpt.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-025",
+      "kind": "synthetic",
+      "category": "unpublished",
+      "jurisdiction": "FR",
+      "pathway_id": null,
+      "question": "Unpublished Home Office scoring notes for French salarié?",
+      "evidence": [
+        {
+          "passage_text": "Service Public page on work authorisation. No scoring methodology or unpublished notes are described.",
+          "source_url": "https://example.test/fr/autorisation",
+          "jurisdiction": "FR",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "French salarié permits are scored using unpublished Home Office notes with a 75-point cutoff.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "French salarié permits are scored using unpublished Home Office notes with a 75-point cutoff.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "75-point",
+        "75"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-026",
+      "kind": "synthetic",
+      "category": "mixed_supported_unsupported",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills requirements?",
+      "evidence": [
+        {
+          "passage_text": "Critical Skills Employment Permit. Remuneration must be at least €38,000 for some Critical Skills occupations.",
+          "source_url": "https://example.test/ie/critical-skills-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Some Critical Skills Employment Permit occupations require remuneration of at least €38,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        },
+        {
+          "claim": "The Critical Skills Employment Permit application fee is exactly €9,999.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Some Critical Skills Employment Permit occupations require remuneration of at least €38,000. The Critical Skills Employment Permit application fee is exactly €9,999.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported",
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        true,
+        false
+      ],
+      "forbidden_in_answer": [
+        "€9,999"
+      ],
+      "required_in_answer": [
+        "€38,000"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-027",
+      "kind": "synthetic",
+      "category": "gap_prose_leak",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills salary?",
+      "evidence": [
+        {
+          "passage_text": "Critical Skills Employment Permit eligibility depends on occupation and remuneration. No numeric threshold is stated.",
+          "source_url": "https://example.test/ie/critical-skills-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        },
+        {
+          "passage_text": "General Employment Permit minimum annual remuneration of €68,911.",
+          "source_url": "https://example.test/ie/general-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 401,
+          "document_version_id": 1401,
+          "chunk_id": 2,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Critical Skills Employment Permit minimum is €68,911.",
+          "evidence_index": [
+            0,
+            1
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Eligibility depends on occupation. The Critical Skills Employment Permit minimum is €68,911.",
+      "missing_information": [
+        "Whether the €68,911 figure is the current official Critical Skills threshold"
+      ],
+      "expected_claim_statuses": [
+        "pathway_mismatch"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€68,911",
+        "68,911"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-028",
+      "kind": "synthetic",
+      "category": "missing_material_conditions",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Am I eligible with a job offer?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa requires an approved sponsor, a certificate of sponsorship, an eligible occupation, and the salary threshold.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "A job offer alone makes an applicant fully eligible for an Alpha Visa.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "A job offer alone makes an applicant fully eligible for an Alpha Visa.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-029",
+      "kind": "synthetic",
+      "category": "unrelated_correct",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Alpha Visa salary?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa general salary threshold is £41,700. Separately, passport photos must meet identity document standards.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa general salary threshold is £41,700.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        },
+        {
+          "claim": "Passport photos must meet identity document standards.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa general salary threshold is £41,700. Passport photos must meet identity document standards.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported",
+        "supported"
+      ],
+      "expected_retained": [
+        true,
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-030",
+      "kind": "synthetic",
+      "category": "correct_salary",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Threshold?",
+      "evidence": [
+        {
+          "passage_text": "Pathway stipend criterion is £30,000 under the stipulated test rules.",
+          "source_url": "https://example.test/syn/30",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The pathway stipend criterion is £30,000 under the stipulated test rules.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The pathway stipend criterion is £30,000 under the stipulated test rules.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "£30,000"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-033",
+      "kind": "synthetic",
+      "category": "incorrect_salary",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Threshold?",
+      "evidence": [
+        {
+          "passage_text": "Pathway stipend criterion is £30,000 under the stipulated test rules.",
+          "source_url": "https://example.test/syn/30-src",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The pathway stipend criterion is £30,001.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The pathway stipend criterion is £30,001.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "£30,001"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-031",
+      "kind": "synthetic",
+      "category": "correct_salary",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "question": "Threshold?",
+      "evidence": [
+        {
+          "passage_text": "Pathway stipend criterion is €40,000 under the stipulated test rules.",
+          "source_url": "https://example.test/syn/31",
+          "jurisdiction": "NL",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The pathway stipend criterion is €40,000 under the stipulated test rules.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The pathway stipend criterion is €40,000 under the stipulated test rules.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "€40,000"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-034",
+      "kind": "synthetic",
+      "category": "incorrect_salary",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "question": "Threshold?",
+      "evidence": [
+        {
+          "passage_text": "Pathway stipend criterion is €40,000 under the stipulated test rules.",
+          "source_url": "https://example.test/syn/31-src",
+          "jurisdiction": "NL",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The pathway stipend criterion is €40,001.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The pathway stipend criterion is €40,001.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€40,001"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-032",
+      "kind": "synthetic",
+      "category": "correct_salary",
+      "jurisdiction": "US",
+      "pathway_id": null,
+      "question": "Threshold?",
+      "evidence": [
+        {
+          "passage_text": "Pathway stipend criterion is $55,000 under the stipulated test rules.",
+          "source_url": "https://example.test/syn/32",
+          "jurisdiction": "US",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The pathway stipend criterion is $55,000 under the stipulated test rules.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The pathway stipend criterion is $55,000 under the stipulated test rules.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "$55,000"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-035",
+      "kind": "synthetic",
+      "category": "incorrect_salary",
+      "jurisdiction": "US",
+      "pathway_id": null,
+      "question": "Threshold?",
+      "evidence": [
+        {
+          "passage_text": "Pathway stipend criterion is $55,000 under the stipulated test rules.",
+          "source_url": "https://example.test/syn/32-src",
+          "jurisdiction": "US",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The pathway stipend criterion is $55,001.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The pathway stipend criterion is $55,001.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "$55,001"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-036",
+      "kind": "synthetic",
+      "category": "future_effective",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "question": "Current criterion?",
+      "evidence": [
+        {
+          "passage_text": "Coming into force on 1 July 2028, the HSM criterion will be €3,500.",
+          "source_url": "https://example.test/nl/hsm-future",
+          "jurisdiction": "NL",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The highly skilled migrant criterion is currently €3,500.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The highly skilled migrant criterion is currently €3,500.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "temporal_uncertainty"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-037",
+      "kind": "synthetic",
+      "category": "historical_as_current",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "question": "Current?",
+      "evidence": [
+        {
+          "passage_text": "Formerly the HSM criterion was €2,400. That figure was superseded.",
+          "source_url": "https://example.test/nl/hsm-old",
+          "jurisdiction": "NL",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The highly skilled migrant criterion is €2,400.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The highly skilled migrant criterion is €2,400.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "temporal_uncertainty"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-038",
+      "kind": "synthetic",
+      "category": "wrong_pathway_attribution",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permit remuneration criteria. Minimum annual remuneration of €36,605.",
+          "source_url": "https://example.test/ie/general-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The General Employment Permit has a minimum annual remuneration of €36,605.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The General Employment Permit has a minimum annual remuneration of €36,605.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "pathway_mismatch"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€36,605"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-039",
+      "kind": "synthetic",
+      "category": "correct_salary",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills remuneration?",
+      "evidence": [
+        {
+          "passage_text": "Critical Skills Employment Permit criteria include occupation type and proposed remuneration. Remuneration must be at least €38,000 for some Critical Skills occupations.",
+          "source_url": "https://example.test/ie/critical-skills-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Some Critical Skills Employment Permit occupations require remuneration of at least €38,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Some Critical Skills Employment Permit occupations require remuneration of at least €38,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [
+        "€38,000"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-040",
+      "kind": "synthetic",
+      "category": "fabricated_fee",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Fee?",
+      "evidence": [
+        {
+          "passage_text": "Student visa overview without a fee table in this excerpt.",
+          "source_url": "https://example.test/gb/student-40",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Student visa application fee is exactly £777.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Student visa application fee is exactly £777.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "£777"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-041",
+      "kind": "synthetic",
+      "category": "fabricated_fee",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Fee?",
+      "evidence": [
+        {
+          "passage_text": "Student visa overview without a fee table in this excerpt.",
+          "source_url": "https://example.test/gb/student-41",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Student visa application fee is exactly €888.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Student visa application fee is exactly €888.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€888"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-042",
+      "kind": "synthetic",
+      "category": "fabricated_fee",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Fee?",
+      "evidence": [
+        {
+          "passage_text": "Student visa overview without a fee table in this excerpt.",
+          "source_url": "https://example.test/gb/student-42",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Student visa application fee is exactly £1,111.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Student visa application fee is exactly £1,111.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "£1,111"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-043",
+      "kind": "synthetic",
+      "category": "gap_prose_leak",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Salary?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa general salary threshold is £41,700.",
+          "source_url": "https://example.test/gb/alpha-visa",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa general salary threshold is £41,700.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        },
+        {
+          "claim": "The Alpha Visa also requires a secret £55,555 deposit.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa general salary threshold is £41,700. The Alpha Visa also requires a secret £55,555 deposit.",
+      "missing_information": [
+        "Whether a £55,555 deposit is required"
+      ],
+      "expected_claim_statuses": [
+        "supported",
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        true,
+        false
+      ],
+      "forbidden_in_answer": [
+        "£55,555",
+        "55,555"
+      ],
+      "required_in_answer": [
+        "£41,700"
+      ],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-044",
+      "kind": "synthetic",
+      "category": "mixed_supported_unsupported",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Student work and fees?",
+      "evidence": [
+        {
+          "passage_text": "Student permission: term-time work limited to 20 hours per week for degree-level courses.",
+          "source_url": "https://example.test/gb/student",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Student permission generally limits term-time work to 20 hours per week for degree-level courses.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        },
+        {
+          "claim": "The Student visa fee is £2,222.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Student permission generally limits term-time work to 20 hours per week for degree-level courses. The Student visa fee is £2,222.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported",
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        true,
+        false
+      ],
+      "forbidden_in_answer": [
+        "£2,222"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-045",
+      "kind": "synthetic",
+      "category": "incomplete_evidence",
+      "jurisdiction": "CA",
+      "pathway_id": null,
+      "question": "Express Entry CRS cutoff?",
+      "evidence": [
+        {
+          "passage_text": "Express Entry overview. Round-specific CRS cut-offs are not listed in this excerpt.",
+          "source_url": "https://example.test/ca/ee",
+          "jurisdiction": "CA",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The current Express Entry CRS cutoff is exactly 500.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The current Express Entry CRS cutoff is exactly 500.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "500"
+      ],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "REAL-001",
+      "kind": "real_official",
+      "category": "work_rights",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Student work conditions?",
+      "evidence": [
+        {
+          "passage_text": "You can work up to 20 hours per week during term time if you’re studying a course at degree level or above.",
+          "source_url": "https://www.gov.uk/student-visa",
+          "jurisdiction": "GB",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "You can work up to 20 hours per week during term time if you’re studying a course at degree level or above.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "You can work up to 20 hours per week during term time if you’re studying a course at degree level or above.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified",
+      "notes": "Captured-style GOV.UK wording for structural test; not a legal currency check."
+    },
+    {
+      "id": "REAL-002",
+      "kind": "real_official",
+      "category": "wrong_pathway_attribution",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills remuneration (F07-style)?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permit remuneration criteria. Minimum annual remuneration of €68,911 for eligible employment where the job is not on the Critical Skills Occupations List.",
+          "source_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/general-employment-permit/",
+          "jurisdiction": "IE",
+          "source_type": "external",
+          "document_id": 501,
+          "document_version_id": 1501,
+          "chunk_id": 1,
+          "provider": "fixture"
+        },
+        {
+          "passage_text": "Critical Skills Employment Permit eligibility is largely determined by the type of occupation and the proposed remuneration level.",
+          "source_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/critical-skills-employment-permit/",
+          "jurisdiction": "IE",
+          "source_type": "external",
+          "document_id": 502,
+          "document_version_id": 1502,
+          "chunk_id": 2,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Critical Skills Employment Permit minimum annual remuneration is €68,911.",
+          "evidence_index": [
+            0,
+            1
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Critical Skills Employment Permit minimum annual remuneration is €68,911.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "pathway_mismatch"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€68,911"
+      ],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified",
+      "notes": "F07/X05 regression shape using official URL hosts; figure not certified current."
+    },
+    {
+      "id": "REAL-003",
+      "kind": "real_official",
+      "category": "valid_pathway_comparison",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Compare permits (X06-style)?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permit remuneration criteria include thresholds of €32,691. Critical Skills Employment Permit is a different permit type.",
+          "source_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/general-employment-permit/",
+          "jurisdiction": "IE",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Unlike the Critical Skills Employment Permit, the General Employment Permit has a separate remuneration threshold of €32,691.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Unlike the Critical Skills Employment Permit, the General Employment Permit has a separate remuneration threshold of €32,691.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified",
+      "notes": "Comparison language must remain allowed."
+    },
+    {
+      "id": "REAL-004",
+      "kind": "real_official",
+      "category": "qualified_uncertainty",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Skilled Worker salary depends on what?",
+      "evidence": [
+        {
+          "passage_text": "You’ll need to be paid a minimum salary. How much depends on when you applied and the type of work.",
+          "source_url": "https://www.gov.uk/skilled-worker-visa",
+          "jurisdiction": "GB",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "You’ll need to be paid a minimum salary; how much depends on when you applied and the type of work.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "You’ll need to be paid a minimum salary; how much depends on when you applied and the type of work.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified",
+      "notes": "Qualitative GOV.UK-style claim without asserting a numeric threshold as current law."
+    },
+    {
+      "id": "REAL-005",
+      "kind": "real_official",
+      "category": "incomplete_evidence",
+      "jurisdiction": "FR",
+      "pathway_id": "fr_passeport_talent",
+      "question": "All Talent categories?",
+      "evidence": [
+        {
+          "passage_text": "Carte talent — titre de séjour pluriannuelle. Detailed category conditions are not in this excerpt.",
+          "source_url": "https://www.service-public.fr/particuliers/vosdroits/F16922",
+          "jurisdiction": "FR",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The carte talent has a fixed list of 15 categories each costing €250.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The carte talent has a fixed list of 15 categories each costing €250.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€250"
+      ],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified"
+    },
+    {
+      "id": "REAL-006",
+      "kind": "real_official",
+      "category": "unpublished",
+      "jurisdiction": "FR",
+      "pathway_id": null,
+      "question": "Unpublished scoring notes?",
+      "evidence": [
+        {
+          "passage_text": "Autorisation de travail d'un salarié étranger en France. No internal scoring notes are published on this page.",
+          "source_url": "https://www.service-public.fr/particuliers/vosdroits/F2728",
+          "jurisdiction": "FR",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "French salarié applications use unpublished Home Office scoring notes with a mandatory 80-point pass mark.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "French salarié applications use unpublished Home Office scoring notes with a mandatory 80-point pass mark.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "80-point",
+        "80"
+      ],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified",
+      "notes": "S05/X13-style trap."
+    },
+    {
+      "id": "REAL-007",
+      "kind": "real_official",
+      "category": "wrong_pathway_attribution",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills (X05-style)?",
+      "evidence": [
+        {
+          "passage_text": "General Employment Permit page lists minimum annual remuneration of €68,911 for eligible employment.",
+          "source_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/general-employment-permit/",
+          "jurisdiction": "IE",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "DETE sets the Critical Skills Employment Permit salary at €68,911.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "DETE sets the Critical Skills Employment Permit salary at €68,911.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "pathway_mismatch"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€68,911"
+      ],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified"
+    },
+    {
+      "id": "REAL-008",
+      "kind": "real_official",
+      "category": "correct_salary",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Critical Skills occupations remuneration theme?",
+      "evidence": [
+        {
+          "passage_text": "Critical Skills Employment Permit. Remuneration must be at least €38,000 for some Critical Skills occupations listed on the Critical Skills Occupations List.",
+          "source_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/critical-skills-employment-permit/",
+          "jurisdiction": "IE",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Some Critical Skills Employment Permit occupations require remuneration of at least €38,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Some Critical Skills Employment Permit occupations require remuneration of at least €38,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified",
+      "notes": "Structural support test; figure not independently human-verified as current."
+    },
+    {
+      "id": "REAL-009",
+      "kind": "real_official",
+      "category": "future_effective",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Future threshold presented as current?",
+      "evidence": [
+        {
+          "passage_text": "From 1 April 2027, illustrative guidance states a general salary threshold of £50,000 will apply. This is future-effective language for testing only.",
+          "source_url": "https://www.gov.uk/skilled-worker-visa",
+          "jurisdiction": "GB",
+          "source_type": "external",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The current Skilled Worker general salary threshold is £50,000.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The current Skilled Worker general salary threshold is £50,000.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "temporal_uncertainty"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified",
+      "notes": "Synthetic future date on official host for temporal behaviour; not a real announcement assertion."
+    },
+    {
+      "id": "REAL-010",
+      "kind": "real_official",
+      "category": "gap_prose_leak",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Do not leak GEP figure into gaps",
+      "evidence": [
+        {
+          "passage_text": "Critical Skills Employment Permit eligibility depends on occupation and remuneration; numeric bands are not shown in this excerpt.",
+          "source_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/critical-skills-employment-permit/",
+          "jurisdiction": "IE",
+          "source_type": "external",
+          "document_id": 601,
+          "document_version_id": 1601,
+          "chunk_id": 1,
+          "provider": "fixture"
+        },
+        {
+          "passage_text": "General Employment Permit minimum annual remuneration of €68,911.",
+          "source_url": "https://enterprise.gov.ie/en/what-we-do/workplace-and-skills/employment-permits/permit-types/general-employment-permit/",
+          "jurisdiction": "IE",
+          "source_type": "external",
+          "document_id": 602,
+          "document_version_id": 1602,
+          "chunk_id": 2,
+          "provider": "fixture"
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Critical Skills Employment Permit minimum annual remuneration is €68,911.",
+          "evidence_index": [
+            0,
+            1
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Critical Skills Employment Permit minimum annual remuneration is €68,911.",
+      "missing_information": [
+        "Whether €68,911 is the official Critical Skills threshold"
+      ],
+      "expected_claim_statuses": [
+        "pathway_mismatch"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [
+        "€68,911",
+        "68,911"
+      ],
+      "required_in_answer": [],
+      "reference_status": "machine_captured_unverified"
+    },
+    {
+      "id": "SYN-046",
+      "kind": "synthetic",
+      "category": "contradictory_passages",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_student",
+      "question": "Maintenance?",
+      "evidence": [
+        {
+          "passage_text": "Maintenance outside London is £1,136 per month.",
+          "source_url": "https://example.test/gb/student-a",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 701,
+          "document_version_id": 1701,
+          "chunk_id": 1,
+          "provider": null
+        },
+        {
+          "passage_text": "Maintenance outside London is exactly £1,023 per month only; £1,136 does not apply.",
+          "source_url": "https://example.test/gb/student-b",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 702,
+          "document_version_id": 1702,
+          "chunk_id": 2,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Maintenance outside London is only exactly £1,136 per month.",
+          "evidence_index": [
+            0,
+            1
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Maintenance outside London is only exactly £1,136 per month.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "contradicted"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-047",
+      "kind": "synthetic",
+      "category": "eligibility_exception",
+      "jurisdiction": "NL",
+      "pathway_id": "nl_highly_skilled_migrant",
+      "question": "Age categories?",
+      "evidence": [
+        {
+          "passage_text": "Highly skilled migrant salary criteria differ by age: under 30 and 30 or older have separate monthly amounts.",
+          "source_url": "https://example.test/nl/hsm",
+          "jurisdiction": "NL",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Highly skilled migrant salary criteria differ by age, with separate amounts for under 30 and 30 or older.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Highly skilled migrant salary criteria differ by age, with separate amounts for under 30 and 30 or older.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-048",
+      "kind": "synthetic",
+      "category": "missing_material_conditions",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Eligibility?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa requires sponsorship, eligible occupation, English language, and salary threshold.",
+          "source_url": "https://example.test/gb/alpha",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Meeting the salary threshold alone is enough for Alpha Visa approval.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Meeting the salary threshold alone is enough for Alpha Visa approval.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "insufficient_evidence"
+      ],
+      "expected_retained": [
+        false
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-049",
+      "kind": "synthetic",
+      "category": "qualified_uncertainty",
+      "jurisdiction": "IE",
+      "pathway_id": "ie_critical_skills_employment_permit",
+      "question": "Exact threshold?",
+      "evidence": [
+        {
+          "passage_text": "Critical Skills Employment Permit eligibility depends on occupation and proposed remuneration; specific bands are not listed here.",
+          "source_url": "https://example.test/ie/critical-skills-employment-permit",
+          "jurisdiction": "IE",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "Critical Skills Employment Permit eligibility depends on occupation and proposed remuneration; specific numeric bands are not listed in the retrieved excerpt.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "Critical Skills Employment Permit eligibility depends on occupation and proposed remuneration; specific numeric bands are not listed in the retrieved excerpt.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported"
+      ],
+      "expected_retained": [
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    },
+    {
+      "id": "SYN-050",
+      "kind": "synthetic",
+      "category": "unrelated_correct",
+      "jurisdiction": "GB",
+      "pathway_id": "gb_skilled_worker",
+      "question": "Salary and photos?",
+      "evidence": [
+        {
+          "passage_text": "Alpha Visa salary threshold is £41,700. Biometric residence permits are issued after a successful application.",
+          "source_url": "https://example.test/gb/alpha",
+          "jurisdiction": "GB",
+          "source_type": "internal",
+          "document_id": 100,
+          "document_version_id": 1100,
+          "chunk_id": 1,
+          "provider": null
+        }
+      ],
+      "claims": [
+        {
+          "claim": "The Alpha Visa salary threshold is £41,700.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        },
+        {
+          "claim": "Biometric residence permits are issued after a successful application.",
+          "evidence_index": [
+            0
+          ],
+          "uncertainty": null
+        }
+      ],
+      "raw_answer": "The Alpha Visa salary threshold is £41,700. Biometric residence permits are issued after a successful application.",
+      "missing_information": [],
+      "expected_claim_statuses": [
+        "supported",
+        "supported"
+      ],
+      "expected_retained": [
+        true,
+        true
+      ],
+      "forbidden_in_answer": [],
+      "required_in_answer": [],
+      "reference_status": "synthetic_stipulated"
+    }
+  ]
+}

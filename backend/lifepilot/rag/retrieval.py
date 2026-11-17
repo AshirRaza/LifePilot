@@ -439,9 +439,14 @@ class InternalKnowledgeRetriever:
         semantic_hits: list[tuple[int, float]] = []
         keyword_hits: list[tuple[int, float]] = []
 
+        query_vector = None
         if mode in ("semantic", "hybrid"):
+            query_vector = self.embedder.embed_queries([qtext]).vectors[0]
             semantic_hits = self._semantic_search(
-                qtext, jurisdiction, limit=candidate_limit
+                qtext,
+                jurisdiction,
+                limit=candidate_limit,
+                query_vector=query_vector,
             )
         if mode in ("keyword", "hybrid"):
             keyword_hits = self._keyword_search(
@@ -480,6 +485,7 @@ class InternalKnowledgeRetriever:
                 top_k=top_k,
                 max_chunks_per_document=max_per_doc,
                 expand_adjacent=bool(query.expand_adjacent_chunks),
+                query_vector=query_vector,
             )
             sem_score = {**sem_score, **extra_sem}
             kw_score = {**kw_score, **extra_kw}
@@ -612,6 +618,7 @@ class InternalKnowledgeRetriever:
         top_k: int,
         max_chunks_per_document: int,
         expand_adjacent: bool,
+        query_vector: object | None = None,
     ) -> tuple[list[int], dict[int, float], dict[int, float], dict[int, float]]:
         """Two-stage selection: rank docs from the pool, then reselect passages.
 
@@ -651,7 +658,9 @@ class InternalKnowledgeRetriever:
 
         query_vec_literal: str | None = None
         if mode in ("semantic", "hybrid"):
-            vector = self.embedder.embed_queries([query]).vectors[0]
+            vector = query_vector
+            if vector is None:
+                vector = self.embedder.embed_queries([query]).vectors[0]
             query_vec_literal = (
                 "[" + ",".join(f"{float(x):.8f}" for x in vector.tolist()) + "]"
             )
@@ -800,9 +809,18 @@ class InternalKnowledgeRetriever:
         return [(int(r[0]), float(r[1])) for r in rows]
 
     def _semantic_search(
-        self, query: str, jurisdiction: str, *, limit: int
+        self,
+        query: str,
+        jurisdiction: str,
+        *,
+        limit: int,
+        query_vector: object | None = None,
     ) -> list[tuple[int, float]]:
-        vector = self.embedder.embed_queries([query]).vectors[0]
+        vector = (
+            query_vector
+            if query_vector is not None
+            else self.embedder.embed_queries([query]).vectors[0]
+        )
         vec_literal = "[" + ",".join(f"{float(x):.8f}" for x in vector.tolist()) + "]"
         # Cosine distance via pgvector; similarity = 1 - distance for unit vectors.
         sql = text(

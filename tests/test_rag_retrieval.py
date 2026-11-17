@@ -384,10 +384,10 @@ def test_hybrid_empty_keyword_falls_back_to_semantic(db_session: Session):
 
     retriever = InternalKnowledgeRetriever(db_session, embedder=fake)
     retriever._semantic_search = (  # type: ignore[method-assign]
-        lambda query, jurisdiction, limit: [(gold.id, 0.91), (distractor.id, 0.40)]
+        lambda query, jurisdiction, limit, **kwargs: [(gold.id, 0.91), (distractor.id, 0.40)]
     )
     retriever._keyword_search = (  # type: ignore[method-assign]
-        lambda query, jurisdiction, limit: []
+        lambda query, jurisdiction, limit, **kwargs: []
     )
     hybrid = retriever.retrieve(
         InternalQuery(
@@ -430,10 +430,10 @@ def test_hybrid_filters_weak_keyword_only_noise(db_session: Session):
     # Many weak keyword-only hits that would otherwise flood unweighted RRF.
     weak_ids = [weak_a.id, weak_b.id] + [weak_a.id + 1000 + i for i in range(20)]
     retriever._semantic_search = (  # type: ignore[method-assign]
-        lambda query, jurisdiction, limit: [(gold.id, 0.93)]
+        lambda query, jurisdiction, limit, **kwargs: [(gold.id, 0.93)]
     )
     retriever._keyword_search = (  # type: ignore[method-assign]
-        lambda query, jurisdiction, limit: [
+        lambda query, jurisdiction, limit, **kwargs: [
             (cid, 0.02) for cid in weak_ids
         ]
     )
@@ -441,7 +441,7 @@ def test_hybrid_filters_weak_keyword_only_noise(db_session: Session):
     # and absent from semantic pool. Here best_kw==0.02 so floor keeps them;
     # force a strong keyword hit on an unrelated id then weak-only noise.
     retriever._keyword_search = (  # type: ignore[method-assign]
-        lambda query, jurisdiction, limit: (
+        lambda query, jurisdiction, limit, **kwargs: (
             [(weak_a.id, 1.0)]
             + [(cid, 0.05) for cid in weak_ids[1:]]
         )
@@ -517,7 +517,7 @@ def test_document_diversification_limits_duplicates(db_session: Session):
     retriever = InternalKnowledgeRetriever(db_session, embedder=fake)
     # Same-doc chunks ranked first — diversification must surface other docs.
     retriever._semantic_search = (  # type: ignore[method-assign]
-        lambda query, jurisdiction, limit: [
+        lambda query, jurisdiction, limit, **kwargs: [
             (base.id, 0.99),
             (extras[0].id, 0.98),
             (extras[1].id, 0.97),
@@ -576,7 +576,7 @@ def test_document_aware_selects_stronger_within_doc_chunk(db_session: Session):
     retriever = InternalKnowledgeRetriever(db_session, embedder=fake)
     # Global pool ranks the weaker chunk first; within-doc stub prefers overview.
     retriever._semantic_search = (  # type: ignore[method-assign]
-        lambda query, jurisdiction, limit: [
+        lambda query, jurisdiction, limit, **kwargs: [
             (weaker.id, 0.99),
             (overview.id, 0.80),
         ]

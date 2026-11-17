@@ -49,10 +49,15 @@ _HIGH_RISK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         r"exemption|work (right|authori[sz]ation)|permanent residence|"
         r"indefinite leave|settlement)\b"
     )),
+    # Avoid matching bare "current/updated" — those appear in ordinary questions and
+    # over-triggered external retrieval. Salary/fee patterns still catch high-risk
+    # "current salary/fee" questions; keep explicit change/transition wording here.
     ("regulatory_change", re.compile(
-        r"(?i)\b(current|currently|as of today|recent(ly)? changed|new rules?|"
-        r"updated|update|effective (from|date)|transitional|from \d{1,2} |"
-        r"after \d{1,2} )\b"
+        r"(?i)\b("
+        r"as of today|recent(ly)?\s+changed|new rules?|"
+        r"coming into force|effective (from|date)|transitional|"
+        r"rule\s+change|policy\s+change|from \d{1,2} |after \d{1,2} "
+        r")\b"
     )),
 ]
 

@@ -32,6 +32,15 @@ from lifepilot.maintenance.pipeline import (  # noqa: E402
     default_reindex,
     run_knowledge_maintenance,
 )
+from lifepilot.ops.maintenance_lock import (  # noqa: E402
+    MaintenanceLockError,
+    maintenance_lock,
+)
+from lifepilot.ops.health import (  # noqa: E402
+    DEFAULT_FRESHNESS_ALERTS,
+    DEFAULT_MAINTENANCE_DIR,
+)
+from datetime import datetime, timezone  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,38 +72,88 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--out",
         type=Path,
-        default=DEFAULT_REPORT,
-        help="Write JSON report path.",
+        default=None,
+        help="Write JSON report path (default: data/runs/knowledge_maintenance/).",
     )
     args = parser.parse_args(argv)
     dry_run = not bool(args.execute)
 
-    factory = get_session_factory()
-    with factory() as session:
-        report = run_knowledge_maintenance(
-            session,
-            dry_run=dry_run,
-            limit=args.limit,
-            jurisdiction=args.jurisdiction,
-            process_editorial=not args.no_reindex,
-            reindex_fn=None if (dry_run or args.no_reindex) else default_reindex,
-        )
-        if not dry_run:
-            session.commit()
-        else:
-            session.rollback()
+    try:
+        with maintenance_lock():
+            factory = get_session_factory()
+            with factory() as session:
+                report = run_knowledge_maintenance(
+                    session,
+                    dry_run=dry_run,
+                    limit=args.limit,
+                    jurisdiction=args.jurisdiction,
+                    process_editorial=not args.no_reindex,
+                    reindex_fn=None if (dry_run or args.no_reindex) else default_reindex,
+                )
+                if not dry_run:
+                    session.commit()
+                else:
+                    session.rollback()
+    except MaintenanceLockError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
     payload = report.to_dict()
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(
+    payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+    out_path = args.out
+    if out_path is None:
+        DEFAULT_MAINTENANCE_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out_path = DEFAULT_MAINTENANCE_DIR / f"report_{stamp}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    # Stable "latest" pointer for readiness/ops probes.
+    latest = DEFAULT_MAINTENANCE_DIR / "latest_report.json"
+    latest.parent.mkdir(parents=True, exist_ok=True)
+    latest.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    # Keep legacy path for older tooling.
+    DEFAULT_REPORT.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_REPORT.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    # Lightweight freshness alert artifact for operators.
+    failed = [
+        i
+        for i in (payload.get("items") or [])
+        if (i.get("status") or "") in {"failed", "error", "fetch_failed"}
+    ]
+    pending = [
+        i
+        for i in (payload.get("items") or [])
+        if (i.get("change_class") or "").startswith("material")
+        or (i.get("status") or "") == "queued_for_review"
+    ]
+    alerts = {
+        "generated_at": payload["generated_at"],
+        "overdue_sources": failed,
+        "pending_material_changes": pending,
+        "counts": payload.get("counts"),
+        "dry_run": payload.get("dry_run"),
+    }
+    DEFAULT_FRESHNESS_ALERTS.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_FRESHNESS_ALERTS.write_text(
+        json.dumps(alerts, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
 
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
         print(f"dry_run={report.dry_run} counts={report.counts}")
-        print(f"wrote {args.out}")
+        print(f"wrote {out_path}")
+        if failed:
+            print(f"ALERT: {len(failed)} failed source checks")
+        if pending:
+            print(f"ALERT: {len(pending)} pending material/review items")
         for item in report.items[:20]:
             print(
                 f"  - doc={item.get('document_id')} "
@@ -103,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if len(report.items) > 20:
             print(f"  ... {len(report.items) - 20} more")
-    return 0
+    return 1 if failed and not dry_run else 0
 
 
 if __name__ == "__main__":

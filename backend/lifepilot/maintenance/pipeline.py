@@ -365,6 +365,7 @@ def run_knowledge_maintenance(
             "Editorial auto-promotion is conservative text classification, not legal verification.",
             "last_checked_at updates do not rewrite retrieved_at provenance.",
             "Failed fetches are never treated as unchanged.",
+            "Editorial reindex runs extract → chunk → embed; embedding failures are reported and block silent success.",
             "This command is not a continuous scheduler; invoke via Task Scheduler/cron/CI.",
         ],
     )
@@ -372,8 +373,12 @@ def run_knowledge_maintenance(
 
 
 def default_reindex(session: Session, document_id: int) -> bool:
-    """Best-effort extract → chunk for one document (embeddings optional)."""
+    """Best-effort extract → chunk → embed for one approved editorial update."""
+    from sqlalchemy import select
+
+    from lifepilot.db.models import DocumentChunk
     from lifepilot.extract.runner import extract_document_version
+    from lifepilot.rag.embed_pipeline import run_embedding
     from lifepilot.rag.pipeline import run_chunking
 
     ver = get_current_version(session, document_id)
@@ -384,4 +389,19 @@ def default_reindex(session: Session, document_id: int) -> bool:
         return False
     extract_document_version(session, ver, doc, persist=True)
     run_chunking(session, document_ids=[document_id], force=True)
+    chunk_ids = list(
+        session.scalars(
+            select(DocumentChunk.id).where(DocumentChunk.document_id == document_id)
+        ).all()
+    )
+    if chunk_ids:
+        # Make newly chunked editorial updates searchable. Failures propagate to
+        # the maintenance caller so the operator can recover; material legal
+        # promotions remain blocked upstream.
+        stats = run_embedding(session, chunk_ids=chunk_ids, force=True)
+        if stats.failed_batches:
+            raise RuntimeError(
+                f"embedding failed for document_id={document_id}: "
+                f"failed_batches={stats.failed_batches}"
+            )
     return True

@@ -29,33 +29,49 @@ def parse_compose(compose_path: Path) -> dict[str, Any]:
         return {"present": False}
     lines = compose_path.read_text(encoding="utf-8").splitlines()
     service_volumes: list[str] = []
+    postgres_volumes: list[str] = []
     top_level_volumes: list[str] = []
     in_service_vols = False
     in_top_vols = False
+    current_service: str | None = None
     for ln in lines:
         stripped = ln.strip()
+        svc = re.match(r"^  ([A-Za-z0-9_]+):\s*$", ln)
+        if svc and not in_top_vols:
+            current_service = svc.group(1)
+            in_service_vols = False
         if re.match(r"^volumes:\s*$", ln):  # top-level
             in_top_vols, in_service_vols = True, False
+            current_service = None
             continue
         if re.match(r"^\s+volumes:\s*$", ln):
             in_service_vols, in_top_vols = True, False
             continue
         if in_service_vols:
             if stripped.startswith("- "):
-                service_volumes.append(stripped[2:].strip())
+                entry = stripped[2:].strip()
+                service_volumes.append(entry)
+                if current_service == "postgres":
+                    postgres_volumes.append(entry)
             elif stripped and not stripped.startswith("#"):
                 in_service_vols = False
         if in_top_vols and re.match(r"^\s+[A-Za-z0-9_]+:\s*$", ln):
             top_level_volumes.append(stripped.rstrip(":"))
     bind_mounts = [v for v in service_volumes if v.startswith(("./", "../", "/", "~"))]
+    postgres_binds = [v for v in postgres_volumes if v.startswith(("./", "../", "/", "~"))]
     named = [v for v in service_volumes if v not in bind_mounts]
+    # Host ./data may mount into api/maintenance workers; it must not mount into Postgres.
+    data_in_postgres = any("data" in v.split(":")[0] for v in postgres_binds)
     return {
         "present": True,
         "service_volume_entries": service_volumes,
         "named_volumes_declared": top_level_volumes,
         "named_volume_mounts": named,
         "bind_mounts": bind_mounts,
-        "raw_data_dir_mounted_in_any_container": any("data" in v.split(":")[0] for v in bind_mounts),
+        "postgres_bind_mounts": postgres_binds,
+        "raw_data_dir_mounted_in_postgres": data_in_postgres,
+        # Backward-compatible alias: historically meant "unsafe for DB container".
+        "raw_data_dir_mounted_in_any_container": data_in_postgres,
     }
 
 
