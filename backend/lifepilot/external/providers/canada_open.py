@@ -19,7 +19,7 @@ from lifepilot.external.models import (
     RetrievalStatus,
     SourceType,
 )
-from lifepilot.external.textutil import extract_passages
+from lifepilot.external.textutil import extract_passages_with_truncation
 
 ACTION_BASE = "https://open.canada.ca/data/api/3/action"
 ALLOWED_HOSTS = frozenset({"open.canada.ca"})
@@ -109,10 +109,11 @@ class CanadaOpenConnector(ExternalConnector):
                     }
                 )
         landing = f"https://open.canada.ca/data/en/dataset/{name}" if name else ""
-        passages = extract_passages(
+        passages, truncated = extract_passages_with_truncation(
             f"{title}\n{notes}\n"
             "Note: Open Government datasets are not IRCC visa eligibility rules."
         )
+        detected_lang = _detect_ckan_language(pkg.get("title"), pkg.get("notes"))
         return ExternalEvidence(
             provider=self.provider_id,
             title=title,
@@ -126,11 +127,13 @@ class CanadaOpenConnector(ExternalConnector):
             passages=passages,
             published_at=_as_str(pkg.get("metadata_created")),
             updated_at=_as_str(pkg.get("metadata_modified")),
-            language="en",
+            language=detected_lang,
             license=_license(pkg),
             legal_status="dataset_catalog",
             metadata={
                 "organization": org.get("title") or org.get("name"),
+                "issuing_authority": org.get("title") or org.get("name"),
+                "has_truncated_passages": truncated,
                 "resources": resource_urls,
                 "tags": [
                     t.get("name")
@@ -142,6 +145,24 @@ class CanadaOpenConnector(ExternalConnector):
                 ),
             },
         )
+
+
+def _detect_ckan_language(title: Any, notes: Any) -> str | None:
+    for val in (title, notes):
+        if isinstance(val, dict):
+            has_en = any(
+                isinstance(val.get(k), str) and val.get(k).strip()
+                for k in ("en", "en-CA")
+            )
+            has_fr = any(
+                isinstance(val.get(k), str) and val.get(k).strip()
+                for k in ("fr", "fr-CA")
+            )
+            if has_en:
+                return "en"
+            if has_fr:
+                return "fr"
+    return None
 
 
 def _title(value: Any) -> str:

@@ -22,6 +22,7 @@ from lifepilot.crawl.storage import (
     write_bytes_atomic,
 )
 from lifepilot.db.models import Document, DocumentExtraction, DocumentVersion
+from lifepilot.db.temporal import merge_temporal_notes
 from lifepilot.extract import docx_structured, html_structured, pdf_structured
 from lifepilot.extract.schema import (
     SCHEMA_VERSION,
@@ -232,6 +233,107 @@ def _write_extraction_json(
     return relative_storage_path(root, abs_path), abs_path, backup
 
 
+def _parse_iso_utc(raw: str | None) -> datetime | None:
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _sync_version_temporal_metadata(
+    session: Session,
+    version: DocumentVersion,
+    structured: StructuredDocument,
+) -> None:
+    """Persist extracted temporal observations onto DocumentVersion safely.
+
+    - Never overwrites valid existing observations with missing values.
+    - Distinguishes PDF file metadata (kept in ``temporal_notes``) from
+      official HTML ``source_published_at`` / ``source_updated_at``.
+    - Never sets ``legal_status`` to ``in_force`` or alters ``retrieved_at`` /
+      ``is_current``.
+    """
+    tmeta = getattr(structured, "temporal_metadata", None) or {}
+    slang = getattr(structured, "language", None)
+    changed = False
+    if slang and isinstance(slang, str) and not (version.language or "").strip():
+        version.language = slang.strip()
+        changed = True
+    if not tmeta:
+        if changed:
+            session.add(version)
+            session.flush()
+        return
+
+    events: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    pub_dt = _parse_iso_utc(tmeta.get("source_published_at"))
+    if pub_dt is not None:
+        if version.source_published_at is None:
+            version.source_published_at = pub_dt
+            changed = True
+        elif version.source_published_at != pub_dt:
+            events.append(
+                {
+                    "at": now_iso,
+                    "event": "extracted_published_differs_from_recorded",
+                    "recorded": version.source_published_at.isoformat(),
+                    "extracted": pub_dt.isoformat(),
+                }
+            )
+
+    upd_dt = _parse_iso_utc(tmeta.get("source_updated_at"))
+    if upd_dt is not None:
+        if version.source_updated_at is None:
+            version.source_updated_at = upd_dt
+            changed = True
+        elif version.source_updated_at != upd_dt:
+            events.append(
+                {
+                    "at": now_iso,
+                    "event": "extracted_updated_differs_from_recorded",
+                    "recorded": version.source_updated_at.isoformat(),
+                    "extracted": upd_dt.isoformat(),
+                }
+            )
+
+    notes_update: dict = {}
+    if tmeta.get("file_created_at"):
+        notes_update["pdf_file_created_at"] = tmeta["file_created_at"]
+    if tmeta.get("file_modified_at"):
+        notes_update["pdf_file_modified_at"] = tmeta["file_modified_at"]
+    if tmeta.get("published_provenance"):
+        notes_update["published_provenance"] = tmeta["published_provenance"]
+    if tmeta.get("updated_provenance"):
+        notes_update["updated_provenance"] = tmeta["updated_provenance"]
+    if tmeta.get("conflicts"):
+        notes_update["extraction_conflicts"] = tmeta["conflicts"]
+    if tmeta.get("observations") and (
+        tmeta.get("file_created_at") or tmeta.get("file_modified_at") or tmeta.get("conflicts")
+    ):
+        notes_update["file_observations"] = [
+            o for o in tmeta["observations"] if o.get("is_file_metadata")
+        ]
+    if events:
+        notes_update["events"] = events
+
+    if notes_update:
+        merged = merge_temporal_notes(version.temporal_notes, notes_update)
+        if merged != version.temporal_notes:
+            version.temporal_notes = merged
+            changed = True
+
+    if changed:
+        session.add(version)
+        session.flush()
+
+
 def extract_document_version(
     session: Session,
     version: DocumentVersion,
@@ -386,6 +488,7 @@ def extract_document_version(
             raw_existing = safe_read_bytes(root, existing.storage_path)
             stored_schema = schema_version_from_extraction_bytes(raw_existing)
             if stored_schema == SCHEMA_VERSION:
+                _sync_version_temporal_metadata(session, version, structured)
                 base.status = STATUS_UNCHANGED
                 base.extraction_id = existing.id
                 base.storage_path = existing.storage_path
@@ -429,6 +532,7 @@ def extract_document_version(
             storage_path=rel_path,
             message=message,
         )
+        _sync_version_temporal_metadata(session, version, structured)
     except Exception:
         restore_from_backup(abs_path, backup)
         raise

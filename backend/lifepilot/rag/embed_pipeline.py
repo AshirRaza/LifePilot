@@ -101,12 +101,11 @@ def iter_eligible_chunk_ids(
     jurisdiction_codes: Sequence[str] | None = None,
     limit: int | None = None,
     only_missing: bool = True,
+    include_historical: bool = False,
 ) -> list[int]:
-    stmt = (
-        select(DocumentChunk.id)
-        .where(DocumentChunk.is_current_version.is_(True))
-        .order_by(DocumentChunk.id)
-    )
+    stmt = select(DocumentChunk.id).order_by(DocumentChunk.id)
+    if not include_historical:
+        stmt = stmt.where(DocumentChunk.is_current_version.is_(True))
     if chunk_ids:
         stmt = stmt.where(DocumentChunk.id.in_(list(chunk_ids)))
     if jurisdiction_codes:
@@ -160,9 +159,10 @@ def run_embedding(
     jurisdiction_codes: Sequence[str] | None = None,
     limit: int | None = None,
     force: bool = False,
+    include_historical: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> EmbedRunStats:
-    """Embed eligible current chunks. Safe to interrupt and rerun."""
+    """Embed eligible chunks (current-only unless ``include_historical=True``)."""
     device = resolve_device(prefer_cuda)
     config = EmbedderConfig(device=device)
     embedder = embedder or E5Embedder(config)
@@ -174,15 +174,10 @@ def run_embedding(
     ensure_embedding_model_row(session, embedder.config)
     session.commit()
 
-    total_current = len(
-        list(
-            session.scalars(
-                select(DocumentChunk.id).where(
-                    DocumentChunk.is_current_version.is_(True)
-                )
-            ).all()
-        )
-    )
+    count_stmt = select(DocumentChunk.id)
+    if not include_historical:
+        count_stmt = count_stmt.where(DocumentChunk.is_current_version.is_(True))
+    total_eligible_pool = len(list(session.scalars(count_stmt).all()))
     ids = iter_eligible_chunk_ids(
         session,
         model_id=embedder.config.model_id,
@@ -190,10 +185,11 @@ def run_embedding(
         jurisdiction_codes=jurisdiction_codes,
         limit=limit,
         only_missing=not force,
+        include_historical=include_historical,
     )
     stats.eligible_chunks = len(ids)
     if not force and not chunk_ids and not jurisdiction_codes and limit is None:
-        stats.skipped_existing = max(0, total_current - stats.eligible_chunks)
+        stats.skipped_existing = max(0, total_eligible_pool - stats.eligible_chunks)
     if progress:
         progress(
             f"Eligible chunks: {stats.eligible_chunks} "

@@ -208,6 +208,10 @@ def _to_answer_response(resp, *, include_evidence: bool) -> AnswerResponse:
         usage=resp.usage.model_dump(mode="json") if resp.usage else None,
         jurisdiction=resp.jurisdiction,
         pathway_id=resp.pathway_id,
+        as_of_date=resp.as_of_date,
+        resolved_reference_date=resp.resolved_reference_date,
+        temporal_mode=resp.temporal_mode,
+        temporal_outcome=resp.temporal_outcome,
         evidence_count=len(resp.evidence or []),
         evidence=evidence_payload,
     )
@@ -326,6 +330,7 @@ def create_app() -> FastAPI:
             jurisdiction=payload.jurisdiction,
             pathway_id=payload.pathway_id,
             conversation_id=payload.conversation_id,
+            as_of_date=payload.as_of_date,
             request_id=http_request_id,
             retrieval={
                 "mode": "hybrid",

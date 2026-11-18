@@ -37,8 +37,13 @@ from lifepilot.crawl.storage import (
     version_file_path,
     write_bytes_atomic,
 )
-from lifepilot.db.current_version import content_matches_current, set_current_version
+from lifepilot.db.current_version import (
+    content_matches_current,
+    get_current_version,
+    set_current_version,
+)
 from lifepilot.db.models import Document, DocumentVersion, Source
+from lifepilot.db.temporal import merge_temporal_notes
 from lifepilot.registry.urls import (
     InvalidRegistryUrlError,
     normalize_url,
@@ -187,6 +192,84 @@ def _pace_host(
         time.sleep(wait)
 
 
+def _sync_unchanged_http_metadata(
+    session: Session,
+    version: DocumentVersion | None,
+    *,
+    http_last_modified: datetime | None,
+    http_etag: str | None,
+    temporal_warnings: list[str] | None,
+    temporal_observations: list[dict] | None,
+    observed_at: datetime | None,
+) -> None:
+    """Backfill missing HTTP header observations on unchanged versions safely.
+
+    Never overwrites existing valid observations with missing or changed headers
+    without recording an append-only trace in ``temporal_notes``.
+    """
+    if version is None:
+        return
+    events: list[dict] = []
+    changed = False
+    stamp = (observed_at or datetime.now(timezone.utc)).isoformat()
+
+    if http_last_modified is not None:
+        if version.http_last_modified is None:
+            version.http_last_modified = http_last_modified
+            changed = True
+            events.append(
+                {
+                    "at": stamp,
+                    "event": "http_last_modified_backfilled",
+                    "value": http_last_modified.isoformat(),
+                }
+            )
+        elif version.http_last_modified != http_last_modified:
+            events.append(
+                {
+                    "at": stamp,
+                    "event": "http_last_modified_changed_on_unchanged_body",
+                    "previous": version.http_last_modified.isoformat(),
+                    "observed": http_last_modified.isoformat(),
+                }
+            )
+
+    if http_etag is not None:
+        if version.http_etag is None:
+            version.http_etag = http_etag
+            changed = True
+            events.append(
+                {
+                    "at": stamp,
+                    "event": "http_etag_backfilled",
+                    "value": http_etag,
+                }
+            )
+        elif version.http_etag != http_etag:
+            events.append(
+                {
+                    "at": stamp,
+                    "event": "http_etag_changed_on_unchanged_body",
+                    "previous": version.http_etag,
+                    "observed": http_etag,
+                }
+            )
+
+    if temporal_warnings or events:
+        updates: dict = {}
+        if temporal_warnings:
+            updates["http_warnings"] = list(temporal_warnings)
+        if temporal_observations:
+            updates["http_observations"] = list(temporal_observations)
+        if events:
+            updates["events"] = events
+        version.temporal_notes = merge_temporal_notes(version.temporal_notes, updates)
+        changed = True
+
+    if changed:
+        session.add(version)
+
+
 def _persist_version(
     session: Session,
     *,
@@ -204,6 +287,11 @@ def _persist_version(
     default_content_type: str,
     success_message: str,
     language: str | None = None,
+    http_last_modified: datetime | None = None,
+    http_etag: str | None = None,
+    retrieved_at: datetime | None = None,
+    temporal_warnings: list[str] | None = None,
+    temporal_observations: list[dict] | None = None,
 ) -> SeedFetchResult:
     """Write a new document version file + row, or report unchanged/conflict."""
     digest = hashlib.sha256(body).hexdigest()
@@ -229,6 +317,16 @@ def _persist_version(
         )
 
     if content_matches_current(session, document.id, digest):
+        current = get_current_version(session, document.id)
+        _sync_unchanged_http_metadata(
+            session,
+            current,
+            http_last_modified=http_last_modified,
+            http_etag=http_etag,
+            temporal_warnings=temporal_warnings,
+            temporal_observations=temporal_observations,
+            observed_at=retrieved_at,
+        )
         session.flush()
         return SeedFetchResult(
             source_id=source.id,
@@ -248,6 +346,16 @@ def _persist_version(
     )
     rel_path = relative_storage_path(storage_root, abs_path)
 
+    temporal_notes = None
+    if temporal_warnings or temporal_observations:
+        temporal_notes = merge_temporal_notes(
+            None,
+            {
+                "http_warnings": list(temporal_warnings or []),
+                "http_observations": list(temporal_observations or []),
+            },
+        )
+
     write_bytes_atomic(abs_path, body)
     try:
         version = DocumentVersion(
@@ -257,7 +365,11 @@ def _persist_version(
             source_url=final_url or requested_url,
             content_type=content_type or default_content_type,
             language=language or source.default_language,
-            retrieved_at=datetime.now(timezone.utc),
+            retrieved_at=retrieved_at or datetime.now(timezone.utc),
+            http_last_modified=http_last_modified,
+            http_etag=http_etag,
+            legal_status="unknown",
+            temporal_notes=temporal_notes,
             http_status=http_status,
             content_sha256=digest,
             byte_size=len(body),
@@ -300,6 +412,11 @@ def _persist_html_version(
     http_status: int | None,
     final_url: str | None,
     storage_root: Path,
+    http_last_modified: datetime | None = None,
+    http_etag: str | None = None,
+    retrieved_at: datetime | None = None,
+    temporal_warnings: list[str] | None = None,
+    temporal_observations: list[dict] | None = None,
 ) -> SeedFetchResult:
     quality = assess_html_content(html_body)
     if not quality.ok:
@@ -336,6 +453,11 @@ def _persist_html_version(
         extension="html",
         default_content_type="text/html",
         success_message="stored new HTML document version",
+        http_last_modified=http_last_modified,
+        http_etag=http_etag,
+        retrieved_at=retrieved_at,
+        temporal_warnings=temporal_warnings,
+        temporal_observations=temporal_observations,
     )
 
 
@@ -444,6 +566,11 @@ def fetch_html_document_url(
         http_status=html.status_code,
         final_url=html.final_url,
         storage_root=root,
+        http_last_modified=getattr(html, "http_last_modified", None),
+        http_etag=getattr(html, "http_etag", None),
+        retrieved_at=getattr(html, "retrieved_at", None),
+        temporal_warnings=getattr(html, "temporal_warnings", None),
+        temporal_observations=getattr(html, "temporal_observations", None),
     )
 
 
@@ -460,6 +587,11 @@ def _persist_binary_version(
     http_status: int | None,
     final_url: str | None,
     storage_root: Path,
+    http_last_modified: datetime | None = None,
+    http_etag: str | None = None,
+    retrieved_at: datetime | None = None,
+    temporal_warnings: list[str] | None = None,
+    temporal_observations: list[dict] | None = None,
 ) -> SeedFetchResult:
     if content_kind not in {"pdf", "docx"}:
         return SeedFetchResult(
@@ -492,6 +624,11 @@ def _persist_binary_version(
         extension=content_kind,
         default_content_type=default_type,
         success_message=f"stored new {content_kind} document version",
+        http_last_modified=http_last_modified,
+        http_etag=http_etag,
+        retrieved_at=retrieved_at,
+        temporal_warnings=temporal_warnings,
+        temporal_observations=temporal_observations,
     )
 
 
@@ -608,6 +745,11 @@ def fetch_binary_document_url(
         http_status=fetched.status_code,
         final_url=fetched.final_url,
         storage_root=root,
+        http_last_modified=getattr(fetched, "http_last_modified", None),
+        http_etag=getattr(fetched, "http_etag", None),
+        retrieved_at=getattr(fetched, "retrieved_at", None),
+        temporal_warnings=getattr(fetched, "temporal_warnings", None),
+        temporal_observations=getattr(fetched, "temporal_observations", None),
     )
 
 
@@ -700,6 +842,11 @@ def fetch_approved_seed(
         http_status=html.status_code,
         final_url=html.final_url,
         storage_root=root,
+        http_last_modified=getattr(html, "http_last_modified", None),
+        http_etag=getattr(html, "http_etag", None),
+        retrieved_at=getattr(html, "retrieved_at", None),
+        temporal_warnings=getattr(html, "temporal_warnings", None),
+        temporal_observations=getattr(html, "temporal_observations", None),
     )
 
 

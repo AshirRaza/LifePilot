@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 
 import certifi
@@ -12,6 +13,7 @@ from lifepilot.crawl.content_type import content_type_base
 from lifepilot.crawl.net_safety import url_has_blocked_fetch_host
 from lifepilot.crawl.policy import CrawlPolicy
 from lifepilot.crawl.robots import check_robots
+from lifepilot.db.temporal import extract_http_header_temporal
 from lifepilot.registry.urls import url_in_any_allowed_pattern
 
 _HTML_TYPES = {"text/html", "application/xhtml+xml"}
@@ -41,6 +43,11 @@ class HtmlFetchResult:
     redirect_chain: list[str] = field(default_factory=list)
     error: str | None = None
     retry_after_seconds: float | None = None
+    http_last_modified: datetime | None = None
+    http_etag: str | None = None
+    retrieved_at: datetime | None = None
+    temporal_warnings: list[str] = field(default_factory=list)
+    temporal_observations: list[dict] = field(default_factory=list)
 
 
 def _is_html_content_type(content_type: str | None) -> bool:
@@ -179,6 +186,10 @@ def fetch_html_seed(
                         )
                     chunks.append(chunk)
                 body = b"".join(chunks)
+                retrieved_at = datetime.now(timezone.utc)
+                http_temporal = extract_http_header_temporal(
+                    response.headers, retrieved_at=retrieved_at
+                )
 
             if _looks_like_pdf(body[:16]):
                 return HtmlFetchResult(
@@ -199,6 +210,11 @@ def fetch_html_seed(
                 content_type=content_type,
                 body=body,
                 redirect_chain=chain,
+                http_last_modified=http_temporal.http_last_modified,
+                http_etag=http_temporal.http_etag,
+                retrieved_at=http_temporal.retrieved_at,
+                temporal_warnings=http_temporal.warnings,
+                temporal_observations=http_temporal.observations,
             )
 
         return HtmlFetchResult(

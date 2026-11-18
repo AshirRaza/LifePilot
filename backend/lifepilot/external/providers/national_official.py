@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
+from lifepilot.db.temporal import extract_http_header_temporal
 from lifepilot.external.base import ExternalConnector
 from lifepilot.external.models import (
     ExternalEvidence,
@@ -21,7 +22,14 @@ from lifepilot.external.models import (
     RetrievalStatus,
     SourceType,
 )
-from lifepilot.external.textutil import extract_passages, html_to_text
+from lifepilot.external.textutil import (
+    extract_passages_with_truncation,
+    html_to_text,
+)
+from lifepilot.extract.html_structured import (
+    extract_html_language_from_html,
+    extract_html_temporal_metadata,
+)
 
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_CATALOG = ROOT / "config" / "external" / "national_official_sources.json"
@@ -155,11 +163,23 @@ class NationalOfficialConnector(ExternalConnector):
                 last_error = f"redirect host not allowlisted: {final_host}"
                 continue
             text = html_to_text(resp.text)
-            passages = extract_passages(text, max_passages=6, max_chars=700)
+            passages, truncated = extract_passages_with_truncation(
+                text, max_passages=6, max_chars=700
+            )
             if not passages:
                 last_status = RetrievalStatus.INVALID_RESPONSE
                 last_error = "no usable text extracted"
                 continue
+            html_temporal = extract_html_temporal_metadata(resp.text)
+            http_temporal = extract_http_header_temporal(resp.headers)
+            html_lang = extract_html_language_from_html(resp.text)
+            from lifepilot.agent.provenance import host_authority_label
+
+            issuing = (
+                str(src.get("authority")).strip()
+                if isinstance(src.get("authority"), str) and src.get("authority").strip()
+                else host_authority_label(resp.final_url or url)
+            )
             items.append(
                 ExternalEvidence(
                     provider=self.provider_id,
@@ -171,11 +191,24 @@ class NationalOfficialConnector(ExternalConnector):
                     pathway_id=src.get("pathway_id") or query.pathway_id,
                     document_id=str(src.get("id")),
                     passages=passages,
-                    language=None,
+                    published_at=html_temporal.get("source_published_at"),
+                    updated_at=html_temporal.get("source_updated_at"),
+                    effective_at=None,
+                    legal_status=None,
+                    language=html_lang,
                     metadata={
                         "catalog_id": src.get("id"),
                         "from_cache": resp.from_cache,
                         "retrieval_channel": "national_official_html",
+                        "issuing_authority": issuing,
+                        "has_truncated_passages": truncated,
+                        "http_last_modified": (
+                            http_temporal.http_last_modified.isoformat()
+                            if http_temporal.http_last_modified
+                            else None
+                        ),
+                        "http_etag": http_temporal.http_etag,
+                        "temporal_provenance": html_temporal or None,
                     },
                 )
             )

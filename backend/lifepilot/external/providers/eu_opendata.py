@@ -19,7 +19,7 @@ from lifepilot.external.models import (
     RetrievalStatus,
     SourceType,
 )
-from lifepilot.external.textutil import extract_passages
+from lifepilot.external.textutil import extract_passages_with_truncation
 
 SEARCH_URL = "https://data.europa.eu/api/hub/search/search"
 ALLOWED_HOSTS = frozenset({"data.europa.eu"})
@@ -120,10 +120,16 @@ class EuOpenDataConnector(ExternalConnector):
                             or dist.get("accessURL"),
                         }
                     )
-        passages = extract_passages(
+        passages, truncated = extract_passages_with_truncation(
             f"{title}\n{description}\n"
             "Note: Open data catalog metadata does not establish national "
             "immigration eligibility rules."
+        )
+        publisher = row.get("publisher") or row.get("organization")
+        pub_name = (
+            publisher.get("name") or publisher.get("title")
+            if isinstance(publisher, dict)
+            else (str(publisher).strip() if isinstance(publisher, str) else None)
         )
         return ExternalEvidence(
             provider=self.provider_id,
@@ -143,6 +149,9 @@ class EuOpenDataConnector(ExternalConnector):
             legal_status="dataset_catalog",
             metadata={
                 "catalog": row.get("catalog") or row.get("catalogue"),
+                "issuing_authority": pub_name,
+                "eu_level_source": True,
+                "has_truncated_passages": truncated,
                 "distributions": resource_meta,
                 "warning": (
                     "Dataset metadata only — not national pathway eligibility evidence."

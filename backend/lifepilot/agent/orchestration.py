@@ -7,7 +7,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Callable, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,6 +18,7 @@ from lifepilot.agent.evidence import (
     EvidenceItem,
     evidence_from_external_item,
     evidence_from_internal_passage,
+    evidence_from_legal_rule,
 )
 from lifepilot.agent.retrieval_policy import (
     ExternalMode,
@@ -27,6 +28,17 @@ from lifepilot.agent.retrieval_policy import (
     detect_high_risk_categories,
     reconcile_effective_dates,
     resolve_external_mode,
+)
+from lifepilot.agent.temporal_dates import detect_question_temporal_intent
+from lifepilot.agent.temporal_selection import (
+    TemporalOutcomeStatus,
+    TemporalQueryMode,
+    resolve_temporal_context,
+    select_temporal_evidence,
+)
+from lifepilot.rag.legal_rules import (
+    LegalRuleLookupResult,
+    query_reviewed_legal_rules,
 )
 from lifepilot.external.http import ExternalHttpClient, HttpClientConfig
 from lifepilot.external.mapping import PROVIDER_JURISDICTIONS, resolve_jurisdiction
@@ -106,6 +118,10 @@ class OrchestrationResult:
     profile_ms: dict[str, float] = field(default_factory=dict)
     retrieval_decision: str | None = None
     retrieval_decision_reasons: list[str] = field(default_factory=list)
+    resolved_reference_date: str | None = None
+    temporal_mode: str | None = None
+    temporal_outcome: str | None = None
+    excluded_evidence: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _is_substantive(text: str) -> bool:
@@ -113,30 +129,69 @@ def _is_substantive(text: str) -> bool:
 
 
 _MONEY_RE = re.compile(r"(?:£|\$|€)\s?\d[\d,]*(?:\.\d+)?")
+_HISTORICAL_EXTERNAL_PROVIDERS = frozenset({ProviderId.US_FEDERAL_REGISTER})
 
 
 def _numeric_conflict_warnings(evidence: list[EvidenceItem]) -> list[str]:
-    """Detect differing monetary literals across internal vs external evidence."""
+    """Detect conflicting monetary/rate values, currencies, or units across sources."""
     from lifepilot.agent.evidence import EvidenceSourceType
+    from lifepilot.agent.numeric import (
+        NumericParseStatus,
+        ParsedNumericValue,
+        quantities_conflict,
+        quantities_from_evidence_item,
+    )
 
-    internal_vals: set[str] = set()
-    external_vals: set[str] = set()
-    for item in evidence:
-        blob = item.passage_text or ""
-        found = {re.sub(r"[\s,]", "", m.group(0)) for m in _MONEY_RE.finditer(blob)}
-        if item.source_type == EvidenceSourceType.INTERNAL_RAG:
-            internal_vals |= found
-        elif item.source_type == EvidenceSourceType.EXTERNAL_API:
-            external_vals |= found
-    if not internal_vals or not external_vals:
-        return []
-    if internal_vals != external_vals and internal_vals.isdisjoint(external_vals):
+    internal_qs: list[ParsedNumericValue] = []
+    external_qs: list[ParsedNumericValue] = []
+    rule_qs: list[ParsedNumericValue] = []
+
+    def _money_or_rate(item: EvidenceItem) -> list[ParsedNumericValue]:
         return [
-            "possible_internal_external_numeric_conflict:"
-            f"internal={sorted(internal_vals)[:5]};external={sorted(external_vals)[:5]};"
-            "do_not_treat_as_settled_without_review"
+            q
+            for q in quantities_from_evidence_item(item)
+            if q.status == NumericParseStatus.PARSED
+            and (q.currency_code or q.currency_ambiguous)
         ]
-    return []
+
+    for item in evidence:
+        found = _money_or_rate(item)
+        if not found:
+            continue
+        if item.source_type == EvidenceSourceType.INTERNAL_RAG:
+            internal_qs.extend(found)
+        elif item.source_type == EvidenceSourceType.EXTERNAL_API:
+            external_qs.extend(found)
+        elif item.source_type == EvidenceSourceType.CURATED_RULE:
+            rule_qs.extend(found)
+
+    def _fmt(qs: list[ParsedNumericValue]) -> list[str]:
+        seen: list[str] = []
+        for q in qs:
+            lbl = q.raw_literal
+            if lbl not in seen:
+                seen.append(lbl)
+            if len(seen) >= 5:
+                break
+        return seen
+
+    def _has_compatible_pair(a: list[ParsedNumericValue], b: list[ParsedNumericValue]) -> bool:
+        return any(not quantities_conflict(qa, qb) for qa in a for qb in b)
+
+    warnings: list[str] = []
+    if internal_qs and external_qs and not _has_compatible_pair(internal_qs, external_qs):
+        warnings.append(
+            "possible_internal_external_numeric_conflict:"
+            f"internal={_fmt(internal_qs)};external={_fmt(external_qs)};"
+            "do_not_treat_as_settled_without_review"
+        )
+    other_qs = internal_qs + external_qs
+    if rule_qs and other_qs and not _has_compatible_pair(rule_qs, other_qs):
+        warnings.append(
+            "possible_curated_rule_vs_passage_numeric_conflict:"
+            f"rule={_fmt(rule_qs)};passage={_fmt(other_qs)}"
+        )
+    return warnings
 
 
 def _deadline_remaining(deadline: float | None) -> float | None:
@@ -202,6 +257,13 @@ class EvidenceOrchestrator:
         external_mode: str | None = None,
         request_id: str | None = None,
         deadline_monotonic: float | None = None,
+        as_of_date: date | None = None,
+        temporal_mode: str | None = None,
+        user_circumstances: dict[str, Any] | None = None,
+        period_start: date | None = None,
+        period_end: date | None = None,
+        temporal_period_year: int | None = None,
+        clarification_needed: bool = False,
     ) -> OrchestrationResult:
         cfg = self.config
         jur = (jurisdiction or "").strip().upper()
@@ -210,6 +272,35 @@ class EvidenceOrchestrator:
                 status=AgentStatus.INVALID_REQUEST,
                 errors=["jurisdiction is required before retrieval"],
             )
+
+        if temporal_mode is None and period_start is None and not clarification_needed:
+            intent = detect_question_temporal_intent(
+                question, explicit_as_of_date=as_of_date
+            )
+            resolved_ref_date: date | None = intent.resolved_reference_date
+            resolved_t_mode = intent.temporal_mode
+            period_start = intent.period_start
+            period_end = intent.period_end
+            temporal_period_year = intent.period_year
+            clarification_needed = intent.clarification_required
+            intent_warnings = list(intent.warnings)
+            intent_missing = list(intent.missing_information)
+        else:
+            intent_warnings = []
+            intent_missing = []
+            if period_start is not None or clarification_needed:
+                resolved_ref_date = as_of_date
+                resolved_t_mode = (
+                    TemporalQueryMode(str(temporal_mode))
+                    if temporal_mode in {m.value for m in TemporalQueryMode}
+                    else TemporalQueryMode.HISTORICAL
+                )
+            else:
+                resolved_ref_date, resolved_t_mode = resolve_temporal_context(as_of_date)
+                if temporal_mode in {m.value for m in TemporalQueryMode} and as_of_date is None:
+                    resolved_t_mode = TemporalQueryMode(str(temporal_mode))
+
+        is_historical_query = resolved_t_mode == TemporalQueryMode.HISTORICAL
 
         mode: RetrievalMode = (
             retrieval_mode
@@ -225,10 +316,25 @@ class EvidenceOrchestrator:
             "Retrieved evidence does not establish complete visa eligibility or "
             "COMPLETE pathway coverage.",
         ]
+        warnings.extend(intent_warnings)
         if pathway_id:
             warnings.append(
                 "pathway_id was not used as a chunk filter; curated pathway tags "
                 "are unavailable and applicability is not inferred."
+            )
+
+        if clarification_needed:
+            return OrchestrationResult(
+                evidence=[],
+                status=AgentStatus.INSUFFICIENT_EVIDENCE,
+                warnings=list(dict.fromkeys(warnings + ["temporal_clarification_required"])),
+                missing_information=list(
+                    dict.fromkeys(intent_missing or ["unambiguous_as_of_date_YYYY_MM_DD"])
+                ),
+                retrieval_decision=RetrievalDecision.INTERNAL_ONLY.value,
+                resolved_reference_date=None,
+                temporal_mode=resolved_t_mode.value,
+                temporal_outcome=TemporalOutcomeStatus.INSUFFICIENT_FOR_DATE.value,
             )
 
         if deadline_monotonic is None:
@@ -240,6 +346,10 @@ class EvidenceOrchestrator:
                 status=AgentStatus.EXECUTION_FAILURE,
                 errors=["request deadline exceeded before evidence orchestration"],
                 warnings=warnings,
+                resolved_reference_date=(
+                    resolved_ref_date.isoformat() if resolved_ref_date else None
+                ),
+                temporal_mode=resolved_t_mode.value,
             )
 
         internal_passages: list[RetrievedPassage] = []
@@ -252,29 +362,39 @@ class EvidenceOrchestrator:
         decision_meta: list[str] = []
         retrieval_decision = RetrievalDecision.INTERNAL_ONLY.value
 
-        connectors_available = bool(explicit_providers_for_jurisdiction(jur))
+        rule_lookup = self._retrieve_curated_rules(
+            jurisdiction=jur,
+            as_of_date=resolved_ref_date,
+            pathway_id=pathway_id,
+            user_circumstances=user_circumstances,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        warnings.extend(rule_lookup.warnings)
+
+        explicit_providers = explicit_providers_for_jurisdiction(jur)
+        connectors_available = bool(explicit_providers)
+        historical_providers = [
+            p for p in explicit_providers if p in _HISTORICAL_EXTERNAL_PROVIDERS
+        ]
 
         # Explicit ON: parallel internal + external for latency.
         if resolved_mode == ExternalMode.ON:
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                fut_internal = pool.submit(
-                    self._retrieve_internal,
-                    question=question,
-                    jurisdiction=jur,
-                    mode=mode,
-                    top_k=capped_top_k,
-                    deadline_monotonic=deadline_monotonic,
-                )
-                fut_external = pool.submit(
-                    self._retrieve_external,
-                    question=question,
-                    jurisdiction=jur,
-                    pathway_id=pathway_id,
-                    deadline_monotonic=deadline_monotonic,
-                )
+            if is_historical_query and not historical_providers:
+                if connectors_available:
+                    warnings.append(
+                        "external_current_connectors_skipped_for_historical_as_of_date"
+                    )
                 try:
-                    internal_passages, internal_status, internal_ms = fut_internal.result(
-                        timeout=_deadline_remaining(deadline_monotonic)
+                    internal_passages, internal_status, internal_ms = self._retrieve_internal(
+                        question=question,
+                        jurisdiction=jur,
+                        mode=mode,
+                        top_k=min(cfg.max_retrieval_top_k, max(capped_top_k, 16)),
+                        deadline_monotonic=deadline_monotonic,
+                        include_historical=is_historical_query,
+                        as_of_date=resolved_ref_date,
+                        temporal_mode=resolved_t_mode.value,
                     )
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"internal_retrieval_failed:{exc.__class__.__name__}")
@@ -282,26 +402,72 @@ class EvidenceOrchestrator:
                     logger.exception(
                         "agent.internal_retrieval_error request_id=%s", request_id
                     )
-                try:
-                    external_items, external_outcomes, external_ms = fut_external.result(
-                        timeout=_deadline_remaining(deadline_monotonic)
+                retrieval_decision = RetrievalDecision.INTERNAL_ONLY.value
+                decision_meta = ["external_mode=on_blocked_for_historical"]
+            else:
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    fut_internal = pool.submit(
+                        self._retrieve_internal,
+                        question=question,
+                        jurisdiction=jur,
+                        mode=mode,
+                        top_k=capped_top_k,
+                        deadline_monotonic=deadline_monotonic,
+                        include_historical=is_historical_query,
+                        as_of_date=resolved_ref_date,
+                        temporal_mode=resolved_t_mode.value,
                     )
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(f"external_retrieval_failed:{exc.__class__.__name__}")
-                    logger.exception(
-                        "agent.external_retrieval_error request_id=%s", request_id
+                    fut_external = pool.submit(
+                        self._retrieve_external,
+                        question=question,
+                        jurisdiction=jur,
+                        pathway_id=pathway_id,
+                        deadline_monotonic=deadline_monotonic,
+                        as_of_date=(
+                            (resolved_ref_date or period_end)
+                            if is_historical_query
+                            else None
+                        ),
+                        historical_only=is_historical_query,
                     )
-            retrieval_decision = RetrievalDecision.INTERNAL_PLUS_EXTERNAL.value
-            decision_meta = ["external_mode=on"]
+                    try:
+                        internal_passages, internal_status, internal_ms = fut_internal.result(
+                            timeout=_deadline_remaining(deadline_monotonic)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(f"internal_retrieval_failed:{exc.__class__.__name__}")
+                        internal_status = "error"
+                        logger.exception(
+                            "agent.internal_retrieval_error request_id=%s", request_id
+                        )
+                    try:
+                        external_items, external_outcomes, external_ms = fut_external.result(
+                            timeout=_deadline_remaining(deadline_monotonic)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(f"external_retrieval_failed:{exc.__class__.__name__}")
+                        logger.exception(
+                            "agent.external_retrieval_error request_id=%s", request_id
+                        )
+                retrieval_decision = RetrievalDecision.INTERNAL_PLUS_EXTERNAL.value
+                decision_meta = ["external_mode=on"]
         else:
             # OFF and AUTO: internal first.
+            internal_top_k = (
+                min(cfg.max_retrieval_top_k, max(capped_top_k, 16))
+                if is_historical_query
+                else capped_top_k
+            )
             try:
                 internal_passages, internal_status, internal_ms = self._retrieve_internal(
                     question=question,
                     jurisdiction=jur,
                     mode=mode,
-                    top_k=capped_top_k,
+                    top_k=internal_top_k,
                     deadline_monotonic=deadline_monotonic,
+                    include_historical=is_historical_query,
+                    as_of_date=resolved_ref_date,
+                    temporal_mode=resolved_t_mode.value,
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"internal_retrieval_failed:{exc.__class__.__name__}")
@@ -316,9 +482,20 @@ class EvidenceOrchestrator:
             substantive_internal = sum(
                 1 for p in internal_passages if _is_substantive(p.content_text)
             )
-            version_ages = self._lookup_version_retrieved_at(
-                [p.document_version_id for p in internal_passages]
-            )
+            version_ages: dict[int, datetime] = {}
+            missing_ver_ids: list[int | None] = []
+            for p in internal_passages:
+                raw_ts = p.last_checked_at or p.retrieved_at
+                if raw_ts and p.document_version_id is not None:
+                    try:
+                        dt = datetime.fromisoformat(raw_ts)
+                        version_ages[int(p.document_version_id)] = dt
+                        continue
+                    except ValueError:
+                        pass
+                missing_ver_ids.append(p.document_version_id)
+            if missing_ver_ids:
+                version_ages.update(self._lookup_version_retrieved_at(missing_ver_ids))
             freshness = assess_internal_freshness(
                 urls=[p.official_url for p in internal_passages],
                 version_retrieved_at=version_ages,
@@ -334,6 +511,8 @@ class EvidenceOrchestrator:
                 internal_status=internal_status,
                 freshness=freshness,
                 connectors_available=connectors_available,
+                temporal_mode=resolved_t_mode.value,
+                historical_connectors_available=bool(historical_providers),
             )
             # LIFEPILOT_AGENT_EXTERNAL_FALLBACK is deprecated: under
             # external_mode=auto, thin internal evidence already triggers
@@ -353,6 +532,12 @@ class EvidenceOrchestrator:
                         jurisdiction=jur,
                         pathway_id=pathway_id,
                         deadline_monotonic=deadline_monotonic,
+                        as_of_date=(
+                            (resolved_ref_date or period_end)
+                            if is_historical_query
+                            else None
+                        ),
+                        historical_only=is_historical_query,
                     )
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"external_retrieval_failed:{exc.__class__.__name__}")
@@ -376,12 +561,19 @@ class EvidenceOrchestrator:
         ]
         run_external = bool(external_items or external_outcomes)
 
-        # Normalize
+        # Normalize (curated reviewed rules first, then internal passages, then external).
         norm_started = time.perf_counter()
         evidence: list[EvidenceItem] = []
+        for rule in rule_lookup.matched_rules:
+            try:
+                evidence.append(evidence_from_legal_rule(rule))
+            except ValueError:
+                continue
+
         for passage in internal_passages:
             if not _is_substantive(passage.content_text):
                 continue
+            tprov = self._internal_temporal_provenance(passage)
             evidence.append(
                 evidence_from_internal_passage(
                     jurisdiction=passage.jurisdiction_code,
@@ -393,7 +585,27 @@ class EvidenceOrchestrator:
                     score=passage.score,
                     heading_path=passage.heading_path,
                     source_id=passage.source_id,
+                    source_name=getattr(passage, "source_name", None),
+                    authority_id=getattr(passage, "authority_id", None),
+                    authority_name=getattr(passage, "authority_name", None),
+                    fetched_via_source_id=getattr(passage, "fetched_via_source_id", None),
+                    document_version_number=getattr(passage, "version_number", None),
+                    chunk_index=getattr(passage, "chunk_index", None),
+                    char_start=getattr(passage, "char_start", None),
+                    char_end=getattr(passage, "char_end", None),
+                    content_sha256=getattr(passage, "chunk_content_sha256", None),
+                    version_content_sha256=getattr(passage, "version_content_sha256", None),
+                    language=getattr(passage, "language", None),
                     applicability_warning=passage.applicability_warning,
+                    title=passage.title,
+                    retrieved_at=passage.retrieved_at,
+                    last_checked_at=passage.last_checked_at,
+                    http_last_modified=passage.http_last_modified,
+                    source_published_at=passage.source_published_at,
+                    source_updated_at=passage.source_updated_at,
+                    legal_status=passage.legal_status,
+                    is_current_version=getattr(passage, "is_current_version", True),
+                    temporal_provenance=tprov,
                 )
             )
 
@@ -404,10 +616,13 @@ class EvidenceOrchestrator:
             if not _is_substantive(passage_text):
                 continue
             try:
+                ext_meta = item.metadata if isinstance(item.metadata, dict) else {}
+                ext_tprov = self._external_temporal_provenance(item)
                 evidence.append(
                     evidence_from_external_item(
                         jurisdiction=item.jurisdiction or jur,
                         official_url=item.official_url or item.canonical_url or "",
+                        canonical_url=item.canonical_url,
                         provider=item.provider.value,
                         passage_text=passage_text,
                         document_id=item.document_id,
@@ -417,12 +632,21 @@ class EvidenceOrchestrator:
                             if hasattr(item.source_type, "value")
                             else str(item.source_type)
                         ),
+                        published_at=item.published_at,
+                        updated_at=item.updated_at,
+                        effective_at=item.effective_at,
+                        retrieved_at=item.retrieved_at,
+                        http_last_modified=ext_meta.get("http_last_modified"),
+                        legal_status=item.legal_status,
+                        language=item.language,
+                        metadata=ext_meta,
+                        temporal_provenance=ext_tprov,
                     )
                 )
             except ValueError:
                 continue
 
-        # Stable de-dupe by evidence_id; preserve order (internal first).
+        # Stable de-dupe by evidence_id; preserve order (curated/internal first).
         deduped: list[EvidenceItem] = []
         seen_ids: set[str] = set()
         for ev in evidence:
@@ -430,7 +654,24 @@ class EvidenceOrchestrator:
                 continue
             seen_ids.add(ev.evidence_id)
             deduped.append(ev)
-        evidence = deduped[: cfg.max_evidence_items]
+
+        # Deterministic numeric conflict detection & temporal selection.
+        conflict_notes = _numeric_conflict_warnings(deduped)
+        temporal_sel = select_temporal_evidence(
+            deduped,
+            resolved_reference_date=resolved_ref_date,
+            temporal_mode=resolved_t_mode,
+            period_start=period_start,
+            period_end=period_end,
+            has_rule_conflicts=bool(rule_lookup.conflicting_rule_keys),
+            has_numeric_conflict=bool(conflict_notes),
+            cohort_clarification_required=rule_lookup.cohort_clarification_required,
+            period_clarification_required=rule_lookup.period_clarification_required,
+            unreviewed_rules_excluded_count=rule_lookup.unreviewed_excluded_count,
+            unknown_date_rules_excluded_count=rule_lookup.unknown_date_excluded_count,
+        )
+        evidence = temporal_sel.kept_evidence[: cfg.max_evidence_items]
+        warnings.extend(temporal_sel.warnings)
         normalize_ms = (time.perf_counter() - norm_started) * 1000
 
         # Provider limitation + partial failure warnings.
@@ -448,7 +689,7 @@ class EvidenceOrchestrator:
                 )
 
         external_was_attempted = (
-            resolved_mode == ExternalMode.ON
+            (resolved_mode == ExternalMode.ON and (not is_historical_query or bool(historical_providers)))
             or run_external
             or any(
                 w.startswith("retrieval_decision:external")
@@ -466,12 +707,14 @@ class EvidenceOrchestrator:
                 "external retrieval skipped."
             )
 
-        # Flag possible numeric conflicts across internal vs external evidence.
-        conflict_notes = _numeric_conflict_warnings(evidence)
+        # Re-check numeric conflicts on retained evidence and emit notes.
+        conflict_notes = _numeric_conflict_warnings(evidence) or conflict_notes
         warnings.extend(conflict_notes)
 
         # Conservative effective-date scan (never invent legal effective dates).
-        date_notes = reconcile_effective_dates(evidence)
+        date_notes = reconcile_effective_dates(
+            evidence, reference_date=resolved_ref_date
+        )
         warnings.extend(date_notes.warnings)
 
         status, missing = self._assess_sufficiency(
@@ -482,6 +725,8 @@ class EvidenceOrchestrator:
             errors=errors,
             jurisdiction=jur,
         )
+        missing.extend(intent_missing)
+        missing.extend(temporal_sel.missing_information)
         missing.extend(date_notes.missing_information)
         if conflict_notes:
             missing.append("resolved_current_numerical_requirement")
@@ -497,11 +742,13 @@ class EvidenceOrchestrator:
             errors = []
 
         logger.info(
-            "agent.evidence request_id=%s jur=%s decision=%s internal=%s "
-            "evidence=%s status=%s reasons=%s",
+            "agent.evidence request_id=%s jur=%s decision=%s tmode=%s toutcome=%s "
+            "internal=%s evidence=%s status=%s reasons=%s",
             request_id,
             jur,
             retrieval_decision,
+            resolved_t_mode.value,
+            temporal_sel.temporal_outcome.value,
             internal_status,
             len(evidence),
             status.value,
@@ -516,7 +763,7 @@ class EvidenceOrchestrator:
         return OrchestrationResult(
             evidence=evidence,
             status=status,
-            warnings=warnings,
+            warnings=list(dict.fromkeys(warnings)),
             errors=errors,
             missing_information=list(dict.fromkeys(missing)),
             internal_ms=round(internal_ms, 3),
@@ -535,6 +782,12 @@ class EvidenceOrchestrator:
             profile_ms=profile,
             retrieval_decision=retrieval_decision,
             retrieval_decision_reasons=list(decision_meta),
+            resolved_reference_date=(
+                resolved_ref_date.isoformat() if resolved_ref_date else None
+            ),
+            temporal_mode=resolved_t_mode.value,
+            temporal_outcome=temporal_sel.temporal_outcome.value,
+            excluded_evidence=temporal_sel.excluded_items,
         )
 
     def _assess_sufficiency(
@@ -655,6 +908,45 @@ class EvidenceOrchestrator:
         self._owns_router = True
         return self._external_router
 
+    def _retrieve_curated_rules(
+        self,
+        *,
+        jurisdiction: str,
+        as_of_date: date | None,
+        pathway_id: str | None,
+        user_circumstances: dict[str, Any] | None,
+        period_start: date | None = None,
+        period_end: date | None = None,
+    ) -> LegalRuleLookupResult:
+        """Query reviewed LegalRule records without failing mocked/unmigrated setups."""
+        if self._session_factory is None and "_retrieve_internal" in self.__dict__:
+            return LegalRuleLookupResult(
+                status="empty",
+                as_of_date=as_of_date,
+                jurisdiction=jurisdiction,
+                pathway_id=pathway_id,
+            )
+        try:
+            factory = self._session_factory_resolved()
+            with factory() as session:
+                return query_reviewed_legal_rules(
+                    session,
+                    jurisdiction=jurisdiction,
+                    as_of_date=as_of_date,
+                    pathway_id=pathway_id,
+                    user_circumstances=user_circumstances,
+                    period_start=period_start,
+                    period_end=period_end,
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("agent.curated_rule_lookup_skipped", exc_info=True)
+            return LegalRuleLookupResult(
+                status="empty",
+                as_of_date=as_of_date,
+                jurisdiction=jurisdiction,
+                pathway_id=pathway_id,
+            )
+
     def _retrieve_internal(
         self,
         *,
@@ -663,6 +955,9 @@ class EvidenceOrchestrator:
         mode: RetrievalMode,
         top_k: int,
         deadline_monotonic: float | None,
+        include_historical: bool = False,
+        as_of_date: date | None = None,
+        temporal_mode: str = "current",
     ) -> tuple[list[RetrievedPassage], str, float]:
         remaining = _deadline_remaining(deadline_monotonic)
         if remaining is not None and remaining <= 0:
@@ -699,6 +994,9 @@ class EvidenceOrchestrator:
                     diversify_documents=True,
                     document_aware_passages=True,
                     expand_adjacent_chunks=True,
+                    as_of_date=as_of_date,
+                    include_historical=include_historical,
+                    temporal_mode=temporal_mode,
                 )
             )
             retrieve_ms = (time.perf_counter() - t_retrieve) * 1000
@@ -733,6 +1031,8 @@ class EvidenceOrchestrator:
         jurisdiction: str,
         pathway_id: str | None,
         deadline_monotonic: float | None,
+        as_of_date: date | None = None,
+        historical_only: bool = False,
     ) -> tuple[list[ExternalEvidence], list[ProviderOutcome], float]:
         remaining = _deadline_remaining(deadline_monotonic)
         if remaining is not None and remaining <= 0:
@@ -745,6 +1045,8 @@ class EvidenceOrchestrator:
         # Keep EU connectors out of non-EU national requests.
         if jur not in EU_RELATED_JURISDICTIONS:
             selected = [p for p in selected if p not in EU_PROVIDER_IDS]
+        if historical_only:
+            selected = [p for p in selected if p in _HISTORICAL_EXTERNAL_PROVIDERS]
         # Deduplicate provider ids (prevent duplicate connector calls).
         seen: set[ProviderId] = set()
         unique_selected: list[ProviderId] = []
@@ -763,6 +1065,12 @@ class EvidenceOrchestrator:
             query=question,
             jurisdiction=jur,
             pathway_id=pathway_id,
+            published_after=None,
+            published_before=(
+                as_of_date.isoformat()
+                if historical_only and as_of_date is not None
+                else None
+            ),
             max_results_per_provider=min(5, self.config.max_evidence_items),
         )
 
@@ -847,6 +1155,54 @@ class EvidenceOrchestrator:
             return "\n".join(p for p in item.passages if p and str(p).strip())
         # Fall back to title only when passages absent — may fail substantive check.
         return (item.title or "").strip()
+
+    @staticmethod
+    def _internal_temporal_provenance(passage: RetrievedPassage) -> dict[str, Any]:
+        import json as _json
+
+        prov: dict[str, Any] = {
+            "origin": "internal_rag",
+            "effective_at_known": False,
+        }
+        raw_notes = getattr(passage, "temporal_notes", None)
+        if raw_notes and isinstance(raw_notes, str):
+            try:
+                parsed = _json.loads(raw_notes)
+                if isinstance(parsed, dict):
+                    if parsed.get("extraction_conflicts"):
+                        prov["conflicts"] = parsed["extraction_conflicts"]
+                        prov["has_conflicts"] = True
+                    if parsed.get("pdf_file_created_at") or parsed.get("pdf_file_modified_at"):
+                        prov["is_file_metadata"] = True
+                        prov["pdf_file_created_at"] = parsed.get("pdf_file_created_at")
+                        prov["pdf_file_modified_at"] = parsed.get("pdf_file_modified_at")
+                    if parsed.get("published_provenance"):
+                        prov["published_provenance"] = parsed["published_provenance"]
+                    if parsed.get("updated_provenance"):
+                        prov["updated_provenance"] = parsed["updated_provenance"]
+            except _json.JSONDecodeError:
+                pass
+        return prov
+
+    @staticmethod
+    def _external_temporal_provenance(item: ExternalEvidence) -> dict[str, Any]:
+        ext_meta = item.metadata if isinstance(item.metadata, dict) else {}
+        prov: dict[str, Any] = {
+            "origin": "external_api",
+            "provider": item.provider.value,
+            "effective_at_is_connector_assertion": bool(item.effective_at),
+            "legal_status_is_connector_assertion": bool(item.legal_status),
+        }
+        nested = ext_meta.get("temporal_provenance")
+        if isinstance(nested, dict):
+            if nested.get("conflicts"):
+                prov["conflicts"] = nested["conflicts"]
+                prov["has_conflicts"] = True
+            if nested.get("published_provenance"):
+                prov["published_provenance"] = nested["published_provenance"]
+            if nested.get("updated_provenance"):
+                prov["updated_provenance"] = nested["updated_provenance"]
+        return prov
 
 
 _orchestrator_override: EvidenceOrchestrator | None = None

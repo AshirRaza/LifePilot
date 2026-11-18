@@ -18,18 +18,31 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from lifepilot.agent.answer import AnswerClaim
-from lifepilot.agent.evidence import EvidenceItem
+from lifepilot.agent.evidence import (
+    EvidenceItem,
+    EvidenceSourceType,
+    EvidenceVerificationState,
+)
 from lifepilot.agent.grounding import (
     claim_numeric_literals_supported,
     claim_passage_overlap_ok,
     compose_grounded_answer_text,
+)
+from lifepilot.agent.numeric import (
+    diagnose_claim_numeric_support,
+    extract_numeric_quantities,
+    material_literals_for_scrub,
+    quantities_conflict,
+    quantities_from_evidence_item,
+    quantity_matches_evidence,
 )
 from lifepilot.agent.pathway_applicability import (
     PathwayApplicability,
@@ -42,10 +55,18 @@ from lifepilot.agent.pathway_applicability import (
     passage_contains_literal,
     should_drop_for_pathway,
 )
+from lifepilot.agent.provenance import (
+    NON_NORMATIVE_AUTHORITY_CATEGORIES,
+    SourceAuthorityCategory,
+)
 from lifepilot.agent.retrieval_policy import (
     detect_high_risk_categories,
     reconcile_effective_dates,
     review_queue_uncertainty,
+)
+from lifepilot.agent.temporal_dates import (
+    extract_effective_date_mentions,
+    parse_unambiguous_date_literal,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +85,12 @@ _FUTURE_RE = re.compile(
     r"(?i)\b("
     r"from\s+\d{1,2}\s+\w+\s+20\d{2}|with effect from|coming into force|"
     r"will apply from|effective from\s+20\d{2}|starting\s+20\d{2}"
+    r")\b"
+)
+_FUTURE_MODAL_RE = re.compile(
+    r"(?i)\b("
+    r"will\s+(?:apply|be|increase|rise|require|take\s+effect|come\s+into\s+force)|"
+    r"coming\s+into\s+force|with\s+effect\s+from"
     r")\b"
 )
 _ELIGIBILITY_OVERCLAIM_RE = re.compile(
@@ -200,7 +227,7 @@ def find_distinct_corroboration(
     all_evidence: list[EvidenceItem],
     pathway_id: str | None,
 ) -> EvidenceItem | None:
-    """Pick a different-URL passage that supports the same numeric + pathway locality."""
+    """Pick a different-URL passage that supports the same numeric + currency + unit."""
     literals = numeric_literals_in_text(claim)
     if not literals:
         return None
@@ -212,7 +239,20 @@ def find_distinct_corroboration(
             continue
         if item.evidence_id in {c.evidence_id for c in cited}:
             continue
-        if not all(passage_contains_literal(item.passage_text or "", lit) for lit in literals):
+        if getattr(item, "source_authority_category", "unknown") in NON_NORMATIVE_AUTHORITY_CATEGORIES:
+            continue
+        if (item.legal_status or "").strip().lower() in {
+            "proposed",
+            "proposed_not_effective",
+            "proposed_or_preparatory",
+            "withdrawn",
+            "dataset_catalog",
+            "portal_html_only",
+        }:
+            continue
+        if requested and not requested.startswith("eu_") and bool((item.provenance or {}).get("eu_level_source")):
+            continue
+        if not diagnose_claim_numeric_support(claim, [item]).supported:
             continue
         if requested and requested not in evidence_pathway_signals(item):
             continue
@@ -236,19 +276,151 @@ def _claim_polar_conflict(claim: str, passages: list[str]) -> str | None:
     return None
 
 
+_COHORT_SCOPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("transitional", re.compile(r"(?i)\b(transitional|continually\s+held|tier\s*2|legacy\s+cohort|pre-?2024)\b")),
+    ("extending_updating", re.compile(r"(?i)\b(extending|updating\s+(?:the\s+)?visa)\b")),
+    ("under_26", re.compile(r"(?i)\bunder\s+26\b")),
+    ("under_30", re.compile(r"(?i)\bunder\s+30\b")),
+    ("over_30", re.compile(r"(?i)\b(30\s+or\s+older|over\s+30)\b")),
+    ("new_entrant", re.compile(r"(?i)\b(new\s+entrant|recent\s+graduate|professional\s+training)\b")),
+    ("phd_stem", re.compile(r"(?i)\b(stem\s+phd|phd\s+in\s+(?:a\s+)?stem)\b")),
+    ("phd_non_stem", re.compile(r"(?i)\b(non-?stem|relevant\s+phd)\b")),
+    ("postdoc", re.compile(r"(?i)\bpostdoctoral\b")),
+    ("healthcare_education", re.compile(r"(?i)\b(healthcare|national\s+pay\s+scale|teaching|prison\s+officer)\b")),
+    ("outside_london", re.compile(r"(?i)\boutside\s+london\b")),
+    ("inside_london", re.compile(r"(?i)\b(in|inside)\s+london\b")),
+    ("financial_sector", re.compile(r"(?i)\bfinancial\s+services\b")),
+)
+_CONDITIONAL_QUALIFIER_RE = re.compile(
+    r"(?i)\b("
+    r"transitional|in\s+some\s+cases|for\s+those\s+who|unless|except|"
+    r"reduced\s+rate|lower\s+(?:requirements?|going\s+rate|threshold)|"
+    r"discount|subject\s+to|if\s+(?:you|the\s+applicant)|"
+    r"apply\s+only\s+to|applies\s+only\s+to|only\s+for\s+|only\s+if\s+|"
+    r"only\s+when\s+|only\s+to\s+applications|only\s+before\s+"
+    r")\b"
+)
+_UNCONDITIONAL_AMOUNT_EXCLUSIVITY_RE = re.compile(
+    r"(?i)\b("
+    r"is\s+only|are\s+only|only\s+exactly|is\s+exactly|must\s+always\s+be|"
+    r"always\s+(?:is|costs?|requires?)|no\s+other\s+threshold"
+    r")\b"
+)
+_BARE_EXCLUSIVITY_RE = re.compile(r"(?i)\b(must\s+be|is\s+exactly|always)\b")
+
+
+@dataclass(frozen=True)
+class _ScopeProfile:
+    cohorts: frozenset[str]
+    dates: frozenset[tuple[str, str]]
+    is_conditional: bool
+
+
+def _extract_scope_profile(text: str) -> _ScopeProfile:
+    blob = text or ""
+    cohorts = frozenset(
+        name for name, pat in _COHORT_SCOPE_PATTERNS if pat.search(blob)
+    )
+    mentions = extract_effective_date_mentions(blob)
+    dates = frozenset(
+        (m.role, m.parsed_date.isoformat() if m.parsed_date else m.date_literal)
+        for m in mentions
+    )
+    is_cond = bool(cohorts or dates or _CONDITIONAL_QUALIFIER_RE.search(blob))
+    return _ScopeProfile(cohorts=cohorts, dates=dates, is_conditional=is_cond)
+
+
+def _has_unconditional_exclusivity(claim: str) -> bool:
+    """True for assertions of a universal sole figure; False for scope-limiting 'apply only to'."""
+    text = claim or ""
+    if _UNCONDITIONAL_AMOUNT_EXCLUSIVITY_RE.search(text):
+        return True
+    if _BARE_EXCLUSIVITY_RE.search(text) and not _CONDITIONAL_QUALIFIER_RE.search(text):
+        return True
+    # Plain "only" counts as amount exclusivity ONLY when not part of a scope-limiting clause.
+    if re.search(r"(?i)\bonly\b", text) and not _CONDITIONAL_QUALIFIER_RE.search(text):
+        return True
+    return False
+
+
+def _curated_rule_applies_on_date(
+    item: EvidenceItem,
+    reference_date: date | None,
+) -> tuple[bool, str]:
+    tprov = item.temporal_provenance or {}
+    eff_status = str(tprov.get("effective_date_status") or "unknown").lower()
+    if eff_status in {"unknown", "partially_known"}:
+        return False, f"curated_rule_{eff_status}"
+    if reference_date is None:
+        return True, "no_reference_date"
+    eff_from = parse_unambiguous_date_literal(tprov.get("effective_from"))
+    eff_to = parse_unambiguous_date_literal(tprov.get("effective_to"))
+    from_inc = bool(tprov.get("effective_from_inclusive", True))
+    to_inc = bool(tprov.get("effective_to_inclusive", True))
+    if eff_from is None:
+        return False, "curated_rule_missing_effective_from"
+    if from_inc and reference_date < eff_from:
+        return False, "curated_rule_before_effective_from"
+    if not from_inc and reference_date <= eff_from:
+        return False, "curated_rule_before_exclusive_effective_from"
+    if eff_to is not None:
+        if to_inc and reference_date > eff_to:
+            return False, "curated_rule_after_effective_to"
+        if not to_inc and reference_date >= eff_to:
+            return False, "curated_rule_on_or_after_exclusive_effective_to"
+        return True, "curated_rule_within_bounds"
+    if eff_status in {"known_open_ended", "announced_future"}:
+        return True, "curated_rule_open_ended"
+    return False, f"curated_rule_incompatible_status:{eff_status}"
+
+
+def _scoped_passage_text_for_claim(claim: str, cited_text: str) -> str:
+    """Keep sentences matching the claim's amounts (or amount-free context)."""
+    claim_qs = extract_numeric_quantities(
+        claim or "", include_years=False, include_bare_integers=True
+    )
+    if not claim_qs or not (cited_text or "").strip():
+        return cited_text
+    sentences = [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", cited_text.strip())
+        if s and s.strip()
+    ]
+    if len(sentences) <= 1:
+        return cited_text
+    kept: list[str] = []
+    for sent in sentences:
+        sent_qs = extract_numeric_quantities(
+            sent, include_years=False, include_bare_integers=True
+        )
+        if not sent_qs or any(
+            quantity_matches_evidence(cq, sq).matched
+            for cq in claim_qs
+            for sq in sent_qs
+        ):
+            kept.append(sent)
+    return " ".join(kept) if kept else cited_text
+
+
 def _claim_conflicts_with_evidence(
     claim: str,
     cited: list[EvidenceItem],
     all_evidence: list[EvidenceItem],
+    *,
+    resolved_reference_date: date | None = None,
 ) -> str | None:
-    """Detect when claim amount conflicts with other official amounts on same pathway theme."""
-    claim_amounts = {
-        re.sub(r"[\s,]", "", m) for m in _CONFLICT_AMOUNT_RE.findall(claim or "")
-    }
-    if not claim_amounts:
+    """Detect genuine same-scope contradictions while allowing compatible cohort/period rules."""
+    claim_qs = extract_numeric_quantities(
+        claim or "", include_years=False, include_bare_integers=True
+    )
+    if not claim_qs:
         return None
-    exclusive = bool(re.search(r"(?i)\b(only|must be|is exactly|always)\b", claim))
+    exclusive = _has_unconditional_exclusivity(claim)
+    claim_scope = _extract_scope_profile(claim)
     claim_paths = set(detect_pathway_ids(claim))
+    claim_mentions = extract_effective_date_mentions(
+        claim or "", reference_date=resolved_reference_date
+    )
 
     claim_frames_historical = bool(
         re.search(
@@ -256,43 +428,171 @@ def _claim_conflicts_with_evidence(
             claim or "",
         )
     )
-    # Cited passage says the claimed amount does not apply / is incorrect.
+    claim_asserts_current = bool(
+        re.search(
+            r"(?i)\b(currently|now|today|at present|current\s+(?:threshold|fee|rule|rate))\b",
+            claim or "",
+        )
+    )
+    claim_frames_future = (not claim_asserts_current) and (
+        any(m.is_future_for_reference for m in claim_mentions)
+        or bool(_FUTURE_MODAL_RE.search(claim or ""))
+    )
+    cited_blob = " ".join(c.passage_text or "" for c in cited)
+    cited_mentions_all = extract_effective_date_mentions(
+        _scoped_passage_text_for_claim(claim or "", cited_blob),
+        reference_date=resolved_reference_date,
+    )
+    cited_marks_historical = bool(
+        _HISTORICAL_RE.search(_scoped_passage_text_for_claim(claim or "", cited_blob))
+        or any(m.is_expired_for_reference for m in cited_mentions_all)
+    )
+    # 1. Cited passage explicitly rejects the claimed amount.
     for item in cited:
         text = item.passage_text or ""
+        item_qs = quantities_from_evidence_item(item)
+        item_scope = _extract_scope_profile(text)
+        same_or_unscoped_cohort = (
+            not claim_scope.cohorts
+            or not item_scope.cohorts
+            or bool(claim_scope.cohorts & item_scope.cohorts)
+        )
         if (
-            any(passage_contains_literal(text, a) for a in claim_amounts)
+            any(quantity_matches_evidence(cq, iq).matched for cq in claim_qs for iq in item_qs)
             and re.search(
                 r"(?i)\b(does not apply|no longer|incorrect|not\s+the\s+threshold)\b",
                 text,
             )
             and not claim_frames_historical
+            and same_or_unscoped_cohort
         ):
             return "cited_passage_rejects_claimed_amount"
-        other = {
-            re.sub(r"[\s,]", "", m) for m in _CONFLICT_AMOUNT_RE.findall(text)
-        }
-        if exclusive and other and not (claim_amounts & other):
+        has_conflict_in_item = bool(
+            item_qs
+            and all(
+                not any(quantity_matches_evidence(cq, iq).matched for iq in item_qs)
+                for cq in claim_qs
+            )
+            and any(quantities_conflict(cq, iq) for cq in claim_qs for iq in item_qs)
+        )
+        if (
+            exclusive
+            and has_conflict_in_item
+            and same_or_unscoped_cohort
+            and not _CONDITIONAL_QUALIFIER_RE.search(claim or "")
+            and not (claim_scope.dates and item_scope.dates and claim_scope.dates != item_scope.dates)
+        ):
             return "conflicting_official_amount_in_cited_passage"
 
-    # Broader corpus: same pathway markers, different exclusive figure.
+    # 2. Applicable reviewed LegalRule records override conflicting unverified passages
+    #    for the same pathway + cohort + effective date.
+    cited_ids = {c.evidence_id for c in cited}
+    for item in all_evidence:
+        if item.source_type != EvidenceSourceType.CURATED_RULE:
+            continue
+        if item.evidence_id in cited_ids:
+            continue
+        rule_ok, _ = _curated_rule_applies_on_date(item, resolved_reference_date)
+        if not rule_ok:
+            continue
+        tprov = item.temporal_provenance or {}
+        prov = item.provenance or {}
+        rule_pathway = prov.get("pathway_id")
+        if claim_paths and rule_pathway and rule_pathway not in claim_paths:
+            continue
+        rule_cohort = str(tprov.get("cohort_key") or "general").lower()
+        rule_is_trans = bool(tprov.get("is_transitional"))
+        # Different cohort rules are compatible, not contradictory.
+        if rule_is_trans or rule_cohort != "general":
+            if not claim_scope.cohorts:
+                continue
+        elif claim_scope.cohorts:
+            # General reviewed rule vs cohort-specific/transitional claim -> compatible.
+            continue
+        if claim_frames_future:
+            continue
+        rule_eff_from = parse_unambiguous_date_literal(tprov.get("effective_from"))
+        if claim_frames_historical and not claim_asserts_current:
+            if resolved_reference_date is None:
+                continue
+            claim_years = [int(y) for y in re.findall(r"\b((?:19|20)\d{2})\b", claim or "")]
+            prior_year_only = bool(
+                rule_eff_from is not None
+                and claim_years
+                and all(y < rule_eff_from.year for y in claim_years)
+            )
+            explicit_expired_in_claim = any(
+                m.is_expired_for_reference for m in claim_mentions
+            )
+            if explicit_expired_in_claim or prior_year_only or (
+                cited_marks_historical
+                and not (
+                    rule_eff_from is not None
+                    and claim_years
+                    and any(y >= rule_eff_from.year for y in claim_years)
+                    and not re.search(r"(?i)\b(until|before)\b", claim or "")
+                )
+            ):
+                continue
+        item_qs = quantities_from_evidence_item(item)
+        if item_qs and all(
+            not any(quantity_matches_evidence(cq, iq).matched for iq in item_qs)
+            for cq in claim_qs
+        ) and any(quantities_conflict(cq, iq) for cq in claim_qs for iq in item_qs):
+            return "conflicts_with_reviewed_legal_rule"
+
+    # 3. Broader corpus: same pathway, same cohort/period scope, unconditional conflict.
     for item in all_evidence:
         text = item.passage_text or ""
+        item_qs = quantities_from_evidence_item(item)
         item_paths = set(evidence_pathway_signals(item))
         if claim_paths and item_paths and claim_paths.isdisjoint(item_paths):
             continue
-        if any(passage_contains_literal(text, a) for a in claim_amounts):
+        item_scope = _extract_scope_profile(text)
+        same_or_unscoped_cohort = (
+            not claim_scope.cohorts
+            or not item_scope.cohorts
+            or bool(claim_scope.cohorts & item_scope.cohorts)
+        )
+        if (
+            any(quantity_matches_evidence(cq, iq).matched for cq in claim_qs for iq in item_qs)
+            and re.search(
+                r"(?i)\b(does not apply|no longer|incorrect|not\s+the\s+threshold)\b",
+                text,
+            )
+            and not claim_frames_historical
+            and same_or_unscoped_cohort
+            and not _CONDITIONAL_QUALIFIER_RE.search(claim or "")
+        ):
+            return "evidence_rejects_claimed_amount"
+        if all(
+            any(quantity_matches_evidence(cq, iq).matched for iq in item_qs)
+            for cq in claim_qs
+        ):
             continue
-        other = {
-            re.sub(r"[\s,]", "", m) for m in _CONFLICT_AMOUNT_RE.findall(text)
-        }
-        if not other or (claim_amounts & other):
+        if not item_qs or not any(
+            quantities_conflict(cq, iq) for cq in claim_qs for iq in item_qs
+        ):
             continue
         pathway_aligned = (
             (claim_paths and item_paths and bool(claim_paths & item_paths))
             or (not claim_paths and not item_paths)
         )
-        if exclusive and pathway_aligned:
-            return "conflicting_official_amount_on_same_pathway"
+        if not (exclusive and pathway_aligned):
+            continue
+        # Compatible if distinct cohorts or distinct effective-date boundaries exist.
+        if (claim_scope.cohorts or item_scope.cohorts) and (
+            claim_scope.cohorts != item_scope.cohorts
+        ):
+            continue
+        if claim_scope.is_conditional or item_scope.is_conditional:
+            if (claim_scope.dates or item_scope.dates) and (
+                claim_scope.dates != item_scope.dates
+            ):
+                continue
+            if claim_scope.cohorts != item_scope.cohorts:
+                continue
+        return "conflicting_official_amount_on_same_pathway"
     return None
 
 
@@ -303,33 +603,202 @@ def _claim_has_material_number(claim: str) -> bool:
     return bool(_MATERIAL_BARE_NUM_RE.search(claim or ""))
 
 
+def _claim_discloses_cohort(claim: str, item: EvidenceItem) -> bool:
+    tprov = item.temporal_provenance or {}
+    cohort_key = str(tprov.get("cohort_key") or "general").lower()
+    if cohort_key == "general" and not tprov.get("is_transitional"):
+        return True
+    low = (claim or "").lower()
+    if cohort_key in low or "transitional" in low:
+        return True
+    scope = _extract_scope_profile(claim)
+    return bool(scope.cohorts or scope.is_conditional)
+
+
 def _temporal_status_for_claim(
     claim: str,
     cited: list[EvidenceItem],
     *,
     future_effective_present: bool,
+    expired_present: bool = False,
+    ambiguous_dates_present: bool = False,
     review_reasons: list[str],
-) -> ClaimVerificationStatus | None:
-    blob = " ".join([claim] + [c.passage_text or "" for c in cited])
-    if future_effective_present or _FUTURE_RE.search(blob):
-        # Claiming current applicability without qualification.
+    resolved_reference_date: date | None = None,
+    temporal_mode: str | None = None,
+    temporal_period_year: int | None = None,
+    user_circumstances: dict[str, Any] | None = None,
+    clarification_needed: bool = False,
+) -> tuple[ClaimVerificationStatus | None, str | None]:
+    """Evaluate temporal status with exact reference-date & curated-rule checks."""
+    curated = [c for c in cited if c.source_type == EvidenceSourceType.CURATED_RULE]
+    non_curated = [c for c in cited if c.source_type != EvidenceSourceType.CURATED_RULE]
+
+    # 1. Check curated reviewed LegalRule items deterministically first.
+    curated_covers_numerics = False
+    if curated:
+        for rule_item in curated:
+            ok, reason = _curated_rule_applies_on_date(
+                rule_item, resolved_reference_date
+            )
+            if not ok:
+                return ClaimVerificationStatus.TEMPORAL_UNCERTAINTY, reason
+            tprov = rule_item.temporal_provenance or {}
+            is_cohort_restricted = (
+                bool(tprov.get("is_transitional"))
+                or str(tprov.get("cohort_key") or "general").lower() != "general"
+            )
+            if is_cohort_restricted and not _claim_discloses_cohort(claim, rule_item):
+                return (
+                    ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                    "cohort_restriction_omitted_from_claim",
+                )
+            if (
+                is_cohort_restricted
+                and not user_circumstances
+                and not clarification_needed
+            ):
+                # Retained with qualification if claim explicitly names the cohort.
+                pass
+        curated_blob = " ".join(r.passage_text or "" for r in curated)
+        claim_lits = numeric_literals_in_text(claim)
+        curated_covers_numerics = bool(claim_lits) and all(
+            passage_contains_literal(curated_blob, lit) for lit in claim_lits
+        )
+        if not non_curated or curated_covers_numerics:
+            for item in non_curated:
+                lstat = (item.legal_status or "unknown").strip().lower()
+                if lstat in {"withdrawn", "proposed", "proposed_not_effective", "proposed_or_preparatory"}:
+                    return (
+                        ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                        f"cited_source_non_enacted_status:{lstat}",
+                    )
+            if clarification_needed or temporal_period_year is not None:
+                return (
+                    ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                    "year_only_or_ambiguous_period_clarification",
+                )
+            return None, None
+
+    # 2. Check legal_status on non-curated cited passages.
+    for item in non_curated:
+        lstat = (item.legal_status or "unknown").strip().lower()
+        if lstat in {"withdrawn", "proposed", "proposed_not_effective", "proposed_or_preparatory"}:
+            return (
+                ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                f"cited_source_non_enacted_status:{lstat}",
+            )
+        if lstat in {"archived", "historical", "superseded"}:
+            if temporal_mode == "historical":
+                return (
+                    ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                    f"historical_snapshot_unverified:{lstat}",
+                )
+            if not re.search(
+                r"(?i)\b(previously|former|historical|until|before|archived|superseded)\b",
+                claim,
+            ):
+                return (
+                    ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                    f"non_current_source_presented_without_framing:{lstat}",
+                )
+
+    # 3. Evaluate passage date mentions against resolved_reference_date (scoped to cited sentence/claim).
+    raw_cited_text = " ".join(c.passage_text or "" for c in non_curated)
+    cited_text = _scoped_passage_text_for_claim(claim, raw_cited_text)
+    ref_for_mentions = resolved_reference_date or datetime.now(timezone.utc).date()
+    cited_mentions = extract_effective_date_mentions(
+        cited_text, reference_date=ref_for_mentions
+    )
+    cited_future = any(m.is_future_for_reference for m in cited_mentions)
+    cited_expired = any(m.is_expired_for_reference for m in cited_mentions)
+    cited_ambiguous = any(
+        m.ambiguous or m.boundary_unresolved for m in cited_mentions
+    )
+
+    if cited_ambiguous:
+        return (
+            ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+            "ambiguous_or_unresolved_effective_date_boundary",
+        )
+
+    blob = " ".join([claim, cited_text])
+    has_past_start_without_modal = bool(
+        _FUTURE_RE.search(blob)
+        and not _FUTURE_MODAL_RE.search(blob)
+        and any(
+            m.role == "start" and m.parsed_date is not None and not m.is_future_for_reference
+            for m in cited_mentions
+        )
+    )
+    if cited_future or (_FUTURE_RE.search(blob) and not has_past_start_without_modal):
+        # Future rule relative to resolved_reference_date.
+        if temporal_mode == "future" and resolved_reference_date is not None:
+            future_starts = [
+                m.parsed_date
+                for m in cited_mentions
+                if m.role == "start" and m.parsed_date is not None
+            ]
+            if future_starts and all(d <= resolved_reference_date for d in future_starts):
+                return None, None
+        cited_has_future_signal = cited_future or (
+            bool(_FUTURE_RE.search(cited_text)) and not has_past_start_without_modal
+        )
         if re.search(r"(?i)\b(currently|now|today|at present)\b", claim) or (
             not re.search(r"(?i)\b(from|will|future|effective)\b", claim)
             and numeric_literals_in_text(claim)
-            and _FUTURE_RE.search(" ".join(c.passage_text or "" for c in cited))
+            and cited_has_future_signal
         ):
-            return ClaimVerificationStatus.TEMPORAL_UNCERTAINTY
-        if _FUTURE_RE.search(" ".join(c.passage_text or "" for c in cited)):
-            return ClaimVerificationStatus.TEMPORAL_UNCERTAINTY
+            return (
+                ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                "future_effective_rule_presented_as_current",
+            )
+        if cited_has_future_signal:
+            return (
+                ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                "future_effective_date_present",
+            )
+
+    if cited_expired:
+        if not re.search(
+            r"(?i)\b(previously|former|historical|until|before|ended|expired)\b",
+            claim,
+        ):
+            return (
+                ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                "expired_or_sunset_rule_without_historical_framing",
+            )
+
     if _HISTORICAL_RE.search(blob) and numeric_literals_in_text(claim):
         if not re.search(r"(?i)\b(previously|former|historical|until|before)\b", claim):
-            # Historical figure presented without historical framing.
-            if _HISTORICAL_RE.search(" ".join(c.passage_text or "" for c in cited)):
-                return ClaimVerificationStatus.TEMPORAL_UNCERTAINTY
+            if _HISTORICAL_RE.search(cited_text):
+                return (
+                    ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                    "historical_figure_without_historical_framing",
+                )
+
+    if temporal_mode == "historical" and any(
+        bool((item.temporal_provenance or {}).get("is_current_version", True))
+        for item in non_curated
+    ):
+        return (
+            ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+            "historical_candidate_from_current_page_unverified",
+        )
+
     if any("potentially_outdated" in r or "pending_change" in r for r in review_reasons):
         if numeric_literals_in_text(claim) or detect_high_risk_categories(claim):
-            return ClaimVerificationStatus.TEMPORAL_UNCERTAINTY
-    return None
+            return (
+                ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+                "pending_change_or_potentially_outdated_queue",
+            )
+
+    if clarification_needed or temporal_period_year is not None:
+        return (
+            ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+            "period_or_date_clarification_required",
+        )
+
+    return None, None
 
 
 def _suppressed_numeric_literals(
@@ -341,7 +810,7 @@ def _suppressed_numeric_literals(
     out: list[str] = []
     seen: set[str] = set()
     for claim in suppressed_claims:
-        literals = list(numeric_literals_in_text(claim))
+        literals = list(material_literals_for_scrub(claim))
         for m in _MATERIAL_BARE_NUM_RE.finditer(claim or ""):
             literals.append(m.group(0))
         for lit in literals:
@@ -428,6 +897,64 @@ def _scrub_missing_information(
     return out
 
 
+def _source_authority_gate(
+    claim: str,
+    cited: list[EvidenceItem],
+    *,
+    jurisdiction: str,
+) -> tuple[ClaimVerificationStatus | None, str | None]:
+    """Block normative verification from statistical datasets, portal stubs, or EU-only sources."""
+    if not cited:
+        return None, None
+    jur = (jurisdiction or "").strip().upper()
+    cats = [getattr(c, "source_authority_category", "unknown") for c in cited]
+    is_normative_claim = bool(
+        numeric_literals_in_text(claim)
+        or detect_high_risk_categories(claim)
+        or re.search(
+            r"(?i)\b(must|required|requires|requirement|minimum|threshold|fee|eligible|eligibility|qualify|permitted)\b",
+            claim or "",
+        )
+    )
+    if all(cat == SourceAuthorityCategory.GOVERNMENT_STATISTICAL_DATASET.value for cat in cats):
+        if is_normative_claim:
+            return (
+                ClaimVerificationStatus.INSUFFICIENT_EVIDENCE,
+                "statistical_dataset_cannot_verify_normative_requirement",
+            )
+    if all(cat == SourceAuthorityCategory.GOVERNMENT_PORTAL.value for cat in cats):
+        if numeric_literals_in_text(claim) or detect_high_risk_categories(claim):
+            return (
+                ClaimVerificationStatus.INSUFFICIENT_EVIDENCE,
+                "portal_page_cannot_verify_normative_requirement",
+            )
+    if jur != "EU" and all(
+        bool((c.provenance or {}).get("eu_level_source"))
+        or "directive_may_need_national_implementation" in (c.legal_status or "")
+        for c in cited
+    ):
+        if is_normative_claim:
+            return (
+                ClaimVerificationStatus.INSUFFICIENT_EVIDENCE,
+                "eu_level_source_cannot_verify_national_implementation",
+            )
+    if any(
+        getattr(c, "is_truncated", False) or "…[truncated]" in (c.passage_text or "")
+        for c in cited
+    ) and (
+        _has_unconditional_exclusivity(claim)
+        or re.search(
+            r"(?i)\b(all\s+applicants|no\s+exceptions|always\s+exempt|without\s+exception)\b",
+            claim or "",
+        )
+    ):
+        return (
+            ClaimVerificationStatus.TEMPORAL_UNCERTAINTY,
+            "cited_excerpt_truncated_qualifiers_may_be_omitted",
+        )
+    return None, None
+
+
 def verify_material_claims(
     *,
     answer: str | None,
@@ -439,6 +966,12 @@ def verify_material_claims(
     missing_information: list[str] | None = None,
     corroborator: OfficialCorroborator | None = None,
     max_external_corroborations: int = 0,
+    resolved_reference_date: date | None = None,
+    temporal_mode: str | None = None,
+    temporal_outcome: str | None = None,
+    temporal_period_year: int | None = None,
+    user_circumstances: dict[str, Any] | None = None,
+    clarification_needed: bool = False,
 ) -> VerificationResult:
     """Verify grounded claims and rebuild the user-visible answer.
 
@@ -454,12 +987,20 @@ def verify_material_claims(
     review_reasons = review_queue_uncertainty(
         jurisdiction=jur, pathway_id=pathway_id
     )
-    date_notes = reconcile_effective_dates(evidence)
+    date_notes = reconcile_effective_dates(
+        evidence, reference_date=resolved_reference_date
+    )
     future_effective = bool(date_notes.future_effective_mentions)
+    expired_present = bool(date_notes.expired_mentions)
+    ambiguous_dates = bool(
+        date_notes.ambiguous_date_mentions or date_notes.unresolved_boundary_mentions
+    )
     if date_notes.warnings:
         warnings.extend(date_notes.warnings)
     if review_reasons:
         warnings.extend(review_reasons)
+    if temporal_outcome:
+        warnings.append(f"temporal_selection:{temporal_outcome}")
 
     outcomes: list[ClaimVerificationOutcome] = []
     retained: list[AnswerClaim] = []
@@ -512,6 +1053,15 @@ def verify_material_claims(
         if _ELIGIBILITY_OVERCLAIM_RE.search(claim.claim):
             status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
             reasons.append("eligibility_overclaim_without_verified_personal_facts")
+        else:
+            auth_status, auth_reason = _source_authority_gate(
+                claim.claim, cited, jurisdiction=jur
+            )
+            if auth_status is not None:
+                status = auth_status
+                reasons.append(auth_reason or "source_authority_insufficient")
+        if status is not None:
+            pass
         elif should_drop_for_pathway(pathway_result, claim=claim.claim):
             status = ClaimVerificationStatus.PATHWAY_MISMATCH
             reasons.append(
@@ -521,27 +1071,64 @@ def verify_material_claims(
             status = ClaimVerificationStatus.PATHWAY_MISMATCH
             reasons.append(pathway_result.reason)
         else:
+            num_diag = diagnose_claim_numeric_support(claim.claim, cited)
+            active_num_contradiction = (
+                not num_diag.supported
+                and num_diag.mismatch_kind in {"currency_mismatch", "unit_mismatch", "percent_mismatch"}
+                and (
+                    num_diag.reason.startswith("currency_mismatch:")
+                    or num_diag.reason.startswith("unit_period_mismatch:")
+                    or num_diag.reason.startswith("duration_unit_mismatch:")
+                    or num_diag.reason in {"duration_vs_monetary_unit_mismatch", "percent_unit_mismatch", "unit_category_mismatch"}
+                )
+            )
             # Temporal gates first for dated numeric claims so future/historical
             # figures are not lost to weak lexical overlap on acronym-heavy excerpts.
-            early_temporal = None
-            if numeric_literals_in_text(claim.claim) and claim_numeric_literals_supported(
-                claim.claim, passages
-            ):
-                early_temporal = _temporal_status_for_claim(
+            early_temporal: ClaimVerificationStatus | None = None
+            early_t_reason: str | None = None
+            if numeric_literals_in_text(claim.claim) and num_diag.supported:
+                early_temporal, early_t_reason = _temporal_status_for_claim(
                     claim.claim,
                     cited,
                     future_effective_present=future_effective,
+                    expired_present=expired_present,
+                    ambiguous_dates_present=ambiguous_dates,
                     review_reasons=review_reasons,
+                    resolved_reference_date=resolved_reference_date,
+                    temporal_mode=temporal_mode,
+                    temporal_period_year=temporal_period_year,
+                    user_circumstances=user_circumstances,
+                    clarification_needed=clarification_needed,
                 )
             if early_temporal is not None:
-                status = early_temporal
-                reasons.append("temporal_or_pending_change_uncertainty")
+                if early_t_reason and (
+                    early_t_reason.startswith("curated_rule_")
+                    or "cited_source_non_enacted_status" in early_t_reason
+                ):
+                    conflict = _claim_conflicts_with_evidence(
+                        claim.claim,
+                        cited,
+                        working_evidence,
+                        resolved_reference_date=resolved_reference_date,
+                    )
+                    if conflict:
+                        status = ClaimVerificationStatus.CONTRADICTED
+                        reasons.append(conflict)
+                    else:
+                        status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+                        reasons.append(early_t_reason)
+                else:
+                    status = early_temporal
+                    reasons.append(early_t_reason or "temporal_or_pending_change_uncertainty")
+            elif active_num_contradiction:
+                status = ClaimVerificationStatus.CONTRADICTED
+                reasons.append(num_diag.reason)
             elif not claim_passage_overlap_ok(claim.claim, passages):
                 status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
                 reasons.append("insufficient_passage_overlap")
-            elif not claim_numeric_literals_supported(claim.claim, passages):
+            elif not num_diag.supported:
                 status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
-                reasons.append("numeric_literal_not_in_passage")
+                reasons.append(num_diag.reason)
             else:
                 polar = _claim_polar_conflict(claim.claim, passages)
                 if polar:
@@ -549,25 +1136,52 @@ def verify_material_claims(
                     reasons.append(polar)
                 else:
                     conflict = _claim_conflicts_with_evidence(
-                        claim.claim, cited, working_evidence
+                        claim.claim,
+                        cited,
+                        working_evidence,
+                        resolved_reference_date=resolved_reference_date,
                     )
                     if conflict:
                         status = ClaimVerificationStatus.CONTRADICTED
                         reasons.append(conflict)
 
         if status is None:
-            temporal = _temporal_status_for_claim(
+            temporal, t_reason = _temporal_status_for_claim(
                 claim.claim,
                 cited,
                 future_effective_present=future_effective,
+                expired_present=expired_present,
+                ambiguous_dates_present=ambiguous_dates,
                 review_reasons=review_reasons,
+                resolved_reference_date=resolved_reference_date,
+                temporal_mode=temporal_mode,
+                temporal_period_year=temporal_period_year,
+                user_circumstances=user_circumstances,
+                clarification_needed=clarification_needed,
             )
             if temporal is not None:
-                status = temporal
-                reasons.append("temporal_or_pending_change_uncertainty")
+                if t_reason and (
+                    t_reason.startswith("curated_rule_")
+                    or "cited_source_non_enacted_status" in t_reason
+                ):
+                    status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+                    reasons.append(t_reason)
+                else:
+                    status = temporal
+                    reasons.append(t_reason or "temporal_or_pending_change_uncertainty")
 
+        cites_verified_rule = any(
+            c.source_type == EvidenceSourceType.CURATED_RULE
+            and c.verification_state == EvidenceVerificationState.HUMAN_VERIFIED_RULE
+            for c in cited
+        )
         high_risk = _is_high_risk_claim(claim.claim, q_cats)
-        if status is None and high_risk and numeric_literals_in_text(claim.claim):
+        if (
+            status is None
+            and high_risk
+            and numeric_literals_in_text(claim.claim)
+            and not cites_verified_rule
+        ):
             independent_checks += 1
             corr = find_distinct_corroboration(
                 claim=claim.claim,
@@ -683,17 +1297,28 @@ def verify_material_claims(
             retained_flag = False
             suppressed.append(claim.claim)
         elif status == ClaimVerificationStatus.INSUFFICIENT_EVIDENCE:
-            # Drop unsupported exact figures and eligibility overclaims; keep soft
-            # qualitative uncertainty only when the claim has no material number.
+            # Drop unsupported exact figures, eligibility overclaims, and normative claims
+            # relying solely on statistical datasets, portal stubs, or unimplemented EU sources.
             drop_insufficient = (
                 _claim_has_material_number(claim.claim)
                 or "eligibility_overclaim_without_verified_personal_facts" in reasons
+                or "statistical_dataset_cannot_verify_normative_requirement" in reasons
+                or "portal_page_cannot_verify_normative_requirement" in reasons
+                or "eu_level_source_cannot_verify_national_implementation" in reasons
             )
             if drop_insufficient:
                 retained_flag = False
                 suppressed.append(claim.claim)
                 if _claim_has_material_number(claim.claim):
                     gap = "confirmation of unsupported numerical requirement"
+                    if gap not in missing:
+                        missing.append(gap)
+                elif "statistical_dataset_cannot_verify_normative_requirement" in reasons:
+                    gap = "official normative pathway guidance (statistical dataset cannot verify requirements)"
+                    if gap not in missing:
+                        missing.append(gap)
+                elif "eu_level_source_cannot_verify_national_implementation" in reasons:
+                    gap = "national implementing guidance (EU-level instrument alone does not establish national rules)"
                     if gap not in missing:
                         missing.append(gap)
                 elif "eligibility_overclaim_without_verified_personal_facts" in reasons:
@@ -710,11 +1335,52 @@ def verify_material_claims(
                 qualified.append(claim.claim)
         elif status == ClaimVerificationStatus.TEMPORAL_UNCERTAINTY:
             retained_flag = True
-            if not revised_uncertainty:
-                revised_uncertainty = (
+            ref_label = (
+                resolved_reference_date.isoformat()
+                if resolved_reference_date is not None
+                else "the requested date"
+            )
+            if any("future_effective" in r for r in reasons):
+                temporal_note = (
+                    f"Future-effective requirement — NOT confirmed as currently applicable on {ref_label}; "
+                    "do not rely on as current law."
+                )
+            elif any("expired_or_sunset" in r or "historical_figure" in r for r in reasons):
+                temporal_note = (
+                    f"Expired or historical requirement — NOT confirmed as currently applicable on {ref_label}; "
+                    "do not treat as confirmed current law."
+                )
+            elif any("historical" in r for r in reasons):
+                temporal_note = (
+                    f"Historical candidate evidence — applicability on {ref_label} is not human-verified."
+                )
+            elif any("cohort_restriction_omitted" in r for r in reasons):
+                temporal_note = (
+                    "Applies only to a restricted applicant cohort; do not treat as a general rule."
+                )
+            elif any("cited_excerpt_truncated" in r for r in reasons):
+                temporal_note = (
+                    "Cited excerpt is truncated — qualifying conditions or exceptions may lie outside "
+                    "this excerpt; do not treat as an exhaustive rule."
+                )
+            elif temporal_period_year is not None and any(
+                "year_only" in r or "period_or_date_clarification" in r for r in reasons
+            ):
+                temporal_note = (
+                    f"Year-only period query ({temporal_period_year}) without an exact as_of_date — "
+                    f"applicability on a specific date within {temporal_period_year} is unconfirmed; "
+                    "do not treat as confirmed current law."
+                )
+            else:
+                temporal_note = (
                     "Effective date / current applicability is unresolved; "
                     "do not treat as confirmed current law."
                 )
+            if revised_uncertainty:
+                if temporal_note.lower() not in revised_uncertainty.lower():
+                    revised_uncertainty = f"{temporal_note} {revised_uncertainty.strip()}"
+            else:
+                revised_uncertainty = temporal_note
             qualified.append(claim.claim)
             remaining_uncertainties.append(revised_uncertainty)
         elif revised_uncertainty:
@@ -750,6 +1416,7 @@ def verify_material_claims(
         answer or "",
         retained,
         missing_information=missing,
+        suppressed_claims=suppressed,
     )
     if not retained:
         status_hint = "insufficient_evidence"

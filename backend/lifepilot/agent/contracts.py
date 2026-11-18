@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from enum import Enum
 from typing import Any, Literal
 
@@ -68,6 +69,13 @@ class AgentRequest(BaseModel):
     )
     retrieval: RetrievalOptions = Field(default_factory=RetrievalOptions)
     request_id: str | None = None
+    as_of_date: date | None = Field(
+        default=None,
+        description=(
+            "Optional legal reference date (YYYY-MM-DD). Omit for current-law "
+            "queries; supply a past date for historical evidence lookup."
+        ),
+    )
 
     @field_validator("question")
     @classmethod
@@ -174,6 +182,10 @@ class AgentResponse(BaseModel):
     pathway_id: str | None = None
     conversation_id: str | None = None
     retrieval_decision: str | None = None
+    as_of_date: date | None = None
+    resolved_reference_date: date | None = None
+    temporal_mode: str | None = None
+    temporal_outcome: str | None = None
 
 
 def validate_agent_request(

@@ -8,6 +8,11 @@ from typing import Any
 
 import pymupdf
 
+from lifepilot.db.temporal import (
+    TemporalDateObservation,
+    parse_pdf_datetime,
+    resolve_temporal_observations,
+)
 from lifepilot.extract.schema import (
     ContentBlock,
     StructuredDocument,
@@ -472,6 +477,38 @@ def _extract_form_labels(
     return blocks
 
 
+def _extract_pdf_temporal_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+    """Extract PDF Info creation/modification timestamps as low-reliability file metadata.
+
+    Never treats PDF creation/modification timestamps as authoritative official
+    publication dates or legal effective dates.
+    """
+    observations: list[TemporalDateObservation] = []
+    for raw_key, kind in (("creationDate", "pdf_created"), ("modDate", "pdf_modified")):
+        raw_val = meta.get(raw_key)
+        if not isinstance(raw_val, str) or not raw_val.strip():
+            continue
+        raw = raw_val.strip()
+        dt, err, status = parse_pdf_datetime(raw)
+        observations.append(
+            TemporalDateObservation(
+                kind=kind,
+                extraction_method="pdf_info_dict",
+                source_field=f"pdf:{raw_key}",
+                raw_value=raw,
+                normalized_utc=dt.isoformat() if dt else None,
+                status=status if dt else (err or "malformed"),
+                reliability="file_metadata_low" if dt else "unparsed",
+                is_file_metadata=True,
+                notes=err
+                or "PDF file metadata; distinct from official publication and legal effective dates.",
+            )
+        )
+    if not observations:
+        return {}
+    return resolve_temporal_observations(observations).to_storage_dict()
+
+
 def extract_pdf_document(data: bytes) -> StructuredDocument:
     """Extract structured text from PDF bytes. Does not perform OCR."""
     if not data:
@@ -510,12 +547,21 @@ def extract_pdf_document(data: bytes) -> StructuredDocument:
             for key in ("author", "subject", "keywords")
             if normalize_text(meta.get(key))
         }
+        temporal_metadata = _extract_pdf_temporal_metadata(meta)
+        from lifepilot.crawl.content_language import infer_text_language
+
+        sample_text = " ".join(
+            (b.text or "") for b in blocks[:25] if b.text
+        )[:4000]
+        language = infer_text_language(sample_text)
         return StructuredDocument(
             title=title,
             blocks=blocks,
             page_count=doc.page_count,
             empty_pages=tuple(empty_pages),
             metadata=metadata,
+            temporal_metadata=temporal_metadata,
+            language=language,
         )
     finally:
         doc.close()

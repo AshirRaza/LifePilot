@@ -22,7 +22,10 @@ from lifepilot.external.models import (
     RetrievalStatus,
     SourceType,
 )
-from lifepilot.external.textutil import extract_passages, html_to_text
+from lifepilot.external.textutil import (
+    extract_passages_with_truncation,
+    html_to_text,
+)
 
 SPARQL_URL = "https://publications.europa.eu/webapi/rdf/sparql"
 CELEX_RESOURCE = "https://publications.europa.eu/resource/celex"
@@ -82,6 +85,7 @@ class EurlexCellarConnector(ExternalConnector):
         for celex in celex_ids[:limit]:
             meta = self._sparql_notice(celex)
             text_passages: list[str] = []
+            truncated = False
             # Prefer XHTML/HTML manifestation via content negotiation.
             html_resp = self.http.get_text(
                 f"{CELEX_RESOURCE}/{quote(celex)}",
@@ -92,7 +96,9 @@ class EurlexCellarConnector(ExternalConnector):
                 use_cache=True,
             )
             if html_resp.ok and html_resp.text:
-                text_passages = extract_passages(html_to_text(html_resp.text), max_passages=6)
+                text_passages, truncated = extract_passages_with_truncation(
+                    html_to_text(html_resp.text), max_passages=6
+                )
             elif not html_resp.ok:
                 last_status = html_resp.retrieval_status
                 last_error = html_resp.error
@@ -100,11 +106,19 @@ class EurlexCellarConnector(ExternalConnector):
             title = (meta or {}).get("title") or f"CELEX {celex}"
             work_type = (meta or {}).get("work_type")
             legal_status = self._classify_legal_status(celex, work_type)
-            passages = text_passages or extract_passages(
-                f"{title}. EU legal instrument CELEX {celex}. "
-                "Directives may require national implementation and do not by "
-                "themselves establish national pathway eligibility."
+            source_type = (
+                SourceType.PROPOSED_RULE
+                if celex.startswith("5") or legal_status == "proposed_or_preparatory"
+                else SourceType.LEGISLATION
             )
+            if text_passages:
+                passages = text_passages
+            else:
+                passages, truncated = extract_passages_with_truncation(
+                    f"{title}. EU legal instrument CELEX {celex}. "
+                    "Directives may require national implementation and do not by "
+                    "themselves establish national pathway eligibility."
+                )
             items.append(
                 ExternalEvidence(
                     provider=self.provider_id,
@@ -112,7 +126,7 @@ class EurlexCellarConnector(ExternalConnector):
                     official_url=f"{EURLEX_HTML}{celex}",
                     canonical_url=f"{CELEX_RESOURCE}/{celex}",
                     document_id=celex,
-                    source_type=SourceType.LEGISLATION,
+                    source_type=source_type,
                     jurisdiction="EU",
                     pathway_id=query.pathway_id,
                     requirement=query.requirement,
@@ -126,6 +140,9 @@ class EurlexCellarConnector(ExternalConnector):
                         "cellar_work": (meta or {}).get("work"),
                         "work_type": work_type,
                         "is_consolidated": celex.startswith("0"),
+                        "eu_level_source": True,
+                        "issuing_authority": "European Union (EUR-Lex)",
+                        "has_truncated_passages": truncated,
                         "warning": (
                             "EU legislation contextualizes requirements; it does not "
                             "replace national immigration rules."
@@ -154,8 +171,8 @@ class EurlexCellarConnector(ExternalConnector):
         text = " ".join(
             p for p in (query.query, query.pathway_id, query.requirement) if p
         ).lower()
-        # Explicit CELEX in query
-        for match in re.findall(r"\b([1230]\d{4}[A-Z]\d{3,4}(?:-\d+)?)\b", text.upper()):
+        # Explicit CELEX in query (supports sectors 0,1,2,3,5 and 1-2 letter instrument codes e.g. 52026PC0001)
+        for match in re.findall(r"\b([01235]\d{4}[A-Z]{1,2}\d{3,4}(?:-\d+)?)\b", text.upper()):
             found.append(match)
         for needle, celex in KNOWN_IMMIGRATION_CELEX.items():
             if needle in text:

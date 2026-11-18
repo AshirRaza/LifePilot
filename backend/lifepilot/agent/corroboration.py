@@ -108,6 +108,7 @@ class BoundedNationalCorroborator:
             self._calls += 1
             items: list[EvidenceItem] = []
             for hit in outcome.items or []:
+                ext_meta = hit.metadata if isinstance(hit.metadata, dict) else {}
                 for passage in (hit.passages or [])[:2]:
                     text = (passage or "").strip()
                     if not text:
@@ -123,6 +124,15 @@ class BoundedNationalCorroborator:
                                 title=hit.title,
                                 source_type_label=hit.source_type.value
                                 if hit.source_type
+                                else None,
+                                published_at=hit.published_at,
+                                updated_at=hit.updated_at,
+                                effective_at=hit.effective_at,
+                                retrieved_at=hit.retrieved_at,
+                                http_last_modified=ext_meta.get("http_last_modified"),
+                                legal_status=hit.legal_status,
+                                temporal_provenance=ext_meta.get("temporal_provenance")
+                                if isinstance(ext_meta.get("temporal_provenance"), dict)
                                 else None,
                             )
                         )

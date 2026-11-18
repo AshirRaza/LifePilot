@@ -19,7 +19,11 @@ from lifepilot.external.models import (
     RetrievalStatus,
     SourceType,
 )
-from lifepilot.external.textutil import dig_body_html, extract_passages, html_to_text
+from lifepilot.external.textutil import (
+    dig_body_html,
+    extract_passages_with_truncation,
+    html_to_text,
+)
 
 BASE = "https://www.gov.uk/api/content"
 ALLOWED_HOSTS = frozenset({"www.gov.uk"})
@@ -131,11 +135,20 @@ class GovukContentConnector(ExternalConnector):
         body_html = dig_body_html(details) or ""
         description = data.get("description") if isinstance(data.get("description"), str) else ""
         text = html_to_text(body_html) if body_html else description
-        passages = extract_passages(text)
+        passages, truncated = extract_passages_with_truncation(text)
         withdrawn = data.get("withdrawn_notice")
         legal_status = None
+        withdrawn_at = None
         if isinstance(withdrawn, dict) and withdrawn:
             legal_status = "withdrawn"
+            withdrawn_at = _as_str(withdrawn.get("withdrawn_at"))
+        links = data.get("links") if isinstance(data.get("links"), dict) else {}
+        orgs_raw = links.get("organisations") if isinstance(links.get("organisations"), list) else []
+        organisations = [
+            str(o.get("title")).strip()
+            for o in orgs_raw
+            if isinstance(o, dict) and isinstance(o.get("title"), str) and o.get("title").strip()
+        ]
         return ExternalEvidence(
             provider=self.provider_id,
             title=str(data.get("title") or base_path),
@@ -157,6 +170,10 @@ class GovukContentConnector(ExternalConnector):
                 "schema_name": data.get("schema_name"),
                 "requested_path": requested_path,
                 "phase": data.get("phase"),
+                "organisations": organisations,
+                "issuing_authority": ", ".join(organisations) if organisations else None,
+                "withdrawn_at": withdrawn_at,
+                "has_truncated_passages": truncated,
             },
         )
 

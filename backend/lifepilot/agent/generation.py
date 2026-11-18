@@ -66,6 +66,8 @@ def generate_grounded_answer(
     evidence: list[EvidenceItem],
     config: AgentConfig | None = None,
     provider: LLMProvider | None = None,
+    resolved_reference_date: str | None = None,
+    temporal_mode: str | None = None,
 ) -> GenerationResult:
     """Produce at most one structured Claude call, then validate citations."""
     cfg = config or get_agent_config()
@@ -99,6 +101,8 @@ def generate_grounded_answer(
         pathway_id=pathway_id,
         user_circumstances=user_circumstances,
         evidence_payload=packed,
+        resolved_reference_date=resolved_reference_date,
+        temporal_mode=temporal_mode,
     )
     messages = [
         LLMMessage(role="system", content=SYSTEM_PROMPT),

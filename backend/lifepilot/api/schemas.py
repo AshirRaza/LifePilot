@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -16,6 +17,10 @@ class AnswerRequest(BaseModel):
     conversation_id: str | None = None
     # Production default is always auto; clients cannot disable verification via API.
     top_k: int = Field(default=8, ge=1, le=20)
+    as_of_date: date | None = Field(
+        default=None,
+        description="Optional ISO legal reference date (YYYY-MM-DD).",
+    )
 
     @field_validator("question")
     @classmethod
@@ -58,6 +63,10 @@ class AnswerResponse(BaseModel):
     usage: dict[str, Any] | None = None
     jurisdiction: str | None = None
     pathway_id: str | None = None
+    as_of_date: date | None = None
+    resolved_reference_date: date | None = None
+    temporal_mode: str | None = None
+    temporal_outcome: str | None = None
     evidence_count: int = 0
     evidence: list[dict[str, Any]] | None = None
 

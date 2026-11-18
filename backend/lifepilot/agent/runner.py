@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date
 from typing import Any
 
 from pydantic import ValidationError
@@ -24,6 +25,17 @@ from lifepilot.agent.graph import get_compiled_agent_graph
 from lifepilot.agent.state import initial_state_from_request
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_opt_date(raw: Any) -> date | None:
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            return date.fromisoformat(raw.strip()[:10])
+        except ValueError:
+            return None
+    return None
 
 
 def _response_from_state(
@@ -104,6 +116,10 @@ def _response_from_state(
         pathway_id=state.get("pathway_id") or request.pathway_id,
         conversation_id=state.get("conversation_id") or request.conversation_id,
         retrieval_decision=state.get("retrieval_decision"),
+        as_of_date=_parse_opt_date(state.get("as_of_date")) or request.as_of_date,
+        resolved_reference_date=_parse_opt_date(state.get("resolved_reference_date")),
+        temporal_mode=state.get("temporal_mode"),
+        temporal_outcome=state.get("temporal_outcome"),
     )
 
 
@@ -167,6 +183,7 @@ def run_agent(
         include_external=parsed.retrieval.include_external,
         external_mode=parsed.retrieval.external_mode,
         max_workflow_steps=cfg.max_workflow_steps,
+        as_of_date=parsed.as_of_date.isoformat() if parsed.as_of_date else None,
     )
 
     try:

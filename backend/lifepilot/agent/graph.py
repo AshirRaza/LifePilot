@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date
 from functools import lru_cache
 from typing import Any, Literal
 
@@ -17,6 +18,8 @@ from lifepilot.agent.generation import generate_grounded_answer
 from lifepilot.agent.orchestration import get_evidence_orchestrator
 from lifepilot.agent.providers import get_llm_provider
 from lifepilot.agent.state import AgentGraphState
+from lifepilot.agent.temporal_dates import detect_question_temporal_intent
+from lifepilot.agent.temporal_selection import resolve_temporal_context
 from lifepilot.agent.verification import verify_material_claims
 
 logger = logging.getLogger(__name__)
@@ -69,19 +72,53 @@ def validate_initialize(state: AgentGraphState) -> dict[str, Any]:
             "authorization or cross-request isolation by itself."
         )
 
+    raw_as_of = state.get("as_of_date")
+    parsed_as_of: date | None = None
+    if isinstance(raw_as_of, date):
+        parsed_as_of = raw_as_of
+    elif isinstance(raw_as_of, str) and raw_as_of.strip():
+        try:
+            parsed_as_of = date.fromisoformat(raw_as_of.strip()[:10])
+        except ValueError:
+            errors.append("as_of_date must be YYYY-MM-DD")
+            status = AgentStatus.INVALID_REQUEST.value
+
+    missing = list(state.get("missing_information") or [])
+    intent = detect_question_temporal_intent(
+        question,
+        explicit_as_of_date=parsed_as_of,
+    )
+    warnings.extend(intent.warnings)
+    for item in intent.missing_information:
+        if item not in missing:
+            missing.append(item)
+
+    resolved_ref = intent.resolved_reference_date
+    temporal_mode = intent.temporal_mode
+
     elapsed = (time.perf_counter() - started) * 1000
     logger.info(
-        "agent.validate request_id=%s jurisdiction=%s status=%s",
+        "agent.validate request_id=%s jurisdiction=%s status=%s temporal_mode=%s ref_date=%s",
         state.get("request_id"),
         jurisdiction or None,
         status,
+        temporal_mode.value,
+        resolved_ref.isoformat() if resolved_ref else None,
     )
     return {
         "step_count": step,
         "status": status,
         "errors": errors,
-        "warnings": warnings,
+        "warnings": list(dict.fromkeys(warnings)),
+        "missing_information": missing,
         "jurisdiction": jurisdiction,
+        "as_of_date": parsed_as_of.isoformat() if parsed_as_of else None,
+        "resolved_reference_date": resolved_ref.isoformat() if resolved_ref else None,
+        "temporal_mode": temporal_mode.value,
+        "temporal_period_year": intent.period_year,
+        "period_start": intent.period_start.isoformat() if intent.period_start else None,
+        "period_end": intent.period_end.isoformat() if intent.period_end else None,
+        "clarification_needed": bool(intent.clarification_required),
         "validate_ms": round(elapsed, 3),
     }
 
@@ -122,6 +159,25 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
         0.1, float(cfg.request_timeout_seconds) - (validate_ms / 1000.0)
     )
 
+    def _parse_d(raw: Any) -> date | None:
+        if isinstance(raw, date):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                return date.fromisoformat(raw.strip()[:10])
+            except ValueError:
+                return None
+        return None
+
+    parsed_as_of = _parse_d(state.get("as_of_date"))
+    parsed_ref_for_orch = parsed_as_of or (
+        _parse_d(state.get("resolved_reference_date"))
+        if state.get("temporal_mode") in {"historical", "future"}
+        else None
+    )
+    parsed_p_start = _parse_d(state.get("period_start"))
+    parsed_p_end = _parse_d(state.get("period_end"))
+
     orchestrator = get_evidence_orchestrator(cfg)
     try:
         result = orchestrator.gather(
@@ -134,6 +190,13 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
             external_mode=str(state.get("external_mode") or "auto"),
             request_id=state.get("request_id"),
             deadline_monotonic=deadline,
+            as_of_date=parsed_ref_for_orch,
+            temporal_mode=state.get("temporal_mode"),
+            user_circumstances=state.get("user_circumstances"),
+            period_start=parsed_p_start,
+            period_end=parsed_p_end,
+            temporal_period_year=state.get("temporal_period_year"),
+            clarification_needed=bool(state.get("clarification_needed")),
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
@@ -151,14 +214,18 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
 
     warnings.extend(result.warnings)
     errors.extend(result.errors)
-    missing = list(result.missing_information)
+    missing = list(dict.fromkeys(missing + list(result.missing_information)))
     status = result.status.value
+
+    resolved_ref_out = getattr(result, "resolved_reference_date", None)
+    if resolved_ref_out is None and not state.get("temporal_period_year") and not state.get("clarification_needed"):
+        resolved_ref_out = state.get("resolved_reference_date")
 
     return {
         "step_count": step,
         "status": status,
         "errors": errors,
-        "warnings": warnings,
+        "warnings": list(dict.fromkeys(warnings)),
         "deferred_stages": deferred,
         "evidence": [item.model_dump(mode="json") for item in result.evidence],
         "missing_information": missing,
@@ -168,6 +235,11 @@ def evidence_extension_point(state: AgentGraphState) -> dict[str, Any]:
         "normalize_ms": result.normalize_ms,
         "external_provider_outcomes": result.external_provider_outcomes,
         "retrieval_decision": result.retrieval_decision,
+        "resolved_reference_date": resolved_ref_out,
+        "temporal_mode": (
+            getattr(result, "temporal_mode", None) or state.get("temporal_mode")
+        ),
+        "temporal_outcome": getattr(result, "temporal_outcome", None),
     }
 
 
@@ -253,6 +325,8 @@ def answer_extension_point(state: AgentGraphState) -> dict[str, Any]:
         evidence=evidence_items,
         config=cfg,
         provider=get_llm_provider(cfg),
+        resolved_reference_date=state.get("resolved_reference_date"),
+        temporal_mode=state.get("temporal_mode"),
     )
 
     warnings.extend(result.warnings)
@@ -361,6 +435,16 @@ def legal_verification(state: AgentGraphState) -> dict[str, Any]:
 
         corroborator = BoundedNationalCorroborator()
 
+    raw_ref = state.get("resolved_reference_date")
+    parsed_ref: date | None = None
+    if isinstance(raw_ref, date):
+        parsed_ref = raw_ref
+    elif isinstance(raw_ref, str) and raw_ref.strip():
+        try:
+            parsed_ref = date.fromisoformat(raw_ref.strip()[:10])
+        except ValueError:
+            parsed_ref = None
+
     result = verify_material_claims(
         answer=state.get("answer"),
         claims=claims,
@@ -371,6 +455,12 @@ def legal_verification(state: AgentGraphState) -> dict[str, Any]:
         missing_information=missing,
         corroborator=corroborator,
         max_external_corroborations=max_ext,
+        resolved_reference_date=parsed_ref,
+        temporal_mode=state.get("temporal_mode"),
+        temporal_outcome=state.get("temporal_outcome"),
+        temporal_period_year=state.get("temporal_period_year"),
+        user_circumstances=state.get("user_circumstances"),
+        clarification_needed=bool(state.get("clarification_needed")),
     )
 
     warnings.extend(result.warnings)

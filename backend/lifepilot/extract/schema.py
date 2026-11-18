@@ -61,6 +61,9 @@ class StructuredDocument:
     page_count: int | None = None
     empty_pages: tuple[int, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Observed temporal & language metadata (kept outside canonical content hash).
+    temporal_metadata: dict[str, Any] = field(default_factory=dict)
+    language: str | None = None
 
     def to_content_dict(self) -> dict[str, Any]:
         """Canonical content used for SHA-256 (no run/extractor metadata)."""
@@ -104,6 +107,10 @@ class StructuredDocument:
             "content_sha256": content_sha256,
             **self.to_content_dict(),
         }
+        if self.temporal_metadata:
+            payload["temporal_metadata"] = dict(self.temporal_metadata)
+        if self.language:
+            payload["language"] = self.language
         return payload
 
 

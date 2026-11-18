@@ -194,11 +194,13 @@ def clear_registry_tables(session: Session) -> None:
         DocumentVersion,
         EmbeddingModel,
         Jurisdiction,
+        LegalRule,
         Source,
     )
 
     assert_connected_to_test_database(session)
     for model in (
+        LegalRule,
         DocumentChunkEmbedding,
         DocumentChunk,
         EmbeddingModel,

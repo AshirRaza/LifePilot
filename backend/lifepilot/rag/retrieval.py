@@ -5,16 +5,20 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from typing import Any, Literal, Sequence
 
-from sqlalchemy import select, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from lifepilot.db.models import (
     PLANNED_EMBEDDING_MODEL_ID,
+    Authority,
     Document,
     DocumentChunk,
+    DocumentVersion,
+    Source,
 )
 from lifepilot.rag.embedder import Embedder
 
@@ -45,6 +49,10 @@ class InternalQuery:
     # Two-stage within-document reselection using existing embeddings/scores.
     document_aware_passages: bool = True
     expand_adjacent_chunks: bool = True
+    # Phase 10B.3 temporal parameters (default preserves current-only behavior).
+    as_of_date: date | None = None
+    include_historical: bool = False
+    temporal_mode: str = "current"
 
 
 @dataclass
@@ -64,6 +72,27 @@ class RetrievedPassage:
     keyword_score: float | None = None
     pathway_id: str | None = None
     requirement_category: str | None = None
+    is_current_version: bool = True
+    title: str | None = None
+    retrieved_at: str | None = None
+    last_checked_at: str | None = None
+    http_last_modified: str | None = None
+    source_published_at: str | None = None
+    source_updated_at: str | None = None
+    legal_status: str | None = None
+    temporal_notes: str | None = None
+    source_name: str | None = None
+    authority_id: int | None = None
+    authority_name: str | None = None
+    fetched_via_source_id: int | None = None
+    version_number: int | None = None
+    chunk_index: int | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    chunk_content_sha256: str | None = None
+    version_content_sha256: str | None = None
+    language: str | None = None
+    content_kind: str | None = None
     verification_state: VerificationState = "unverified_retrieval"
     applicability_warning: str = (
         "Retrieved passage is not validated pathway evidence and must not be "
@@ -76,9 +105,22 @@ class RetrievedPassage:
             "document_id": self.document_id,
             "document_version_id": self.document_version_id,
             "source_id": self.source_id,
+            "source_name": self.source_name,
+            "authority_id": self.authority_id,
+            "authority_name": self.authority_name,
+            "fetched_via_source_id": self.fetched_via_source_id,
+            "version_number": self.version_number,
+            "chunk_index": self.chunk_index,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+            "chunk_content_sha256": self.chunk_content_sha256,
+            "version_content_sha256": self.version_content_sha256,
+            "language": self.language,
+            "content_kind": self.content_kind,
             "jurisdiction_code": self.jurisdiction_code,
             "official_url": self.official_url,
             "heading_path": self.heading_path,
+            "title": self.title,
             "content_text": self.content_text,
             "score": round(self.score, 6),
             "semantic_rank": self.semantic_rank,
@@ -91,6 +133,13 @@ class RetrievedPassage:
             ),
             "pathway_id": self.pathway_id,
             "requirement_category": self.requirement_category,
+            "is_current_version": self.is_current_version,
+            "retrieved_at": self.retrieved_at,
+            "last_checked_at": self.last_checked_at,
+            "http_last_modified": self.http_last_modified,
+            "source_published_at": self.source_published_at,
+            "source_updated_at": self.source_updated_at,
+            "legal_status": self.legal_status,
             "verification_state": self.verification_state,
             "applicability_warning": self.applicability_warning,
         }
@@ -435,7 +484,8 @@ class InternalKnowledgeRetriever:
                 )
 
         # Oversample candidates so document-aware selection still yields top_k.
-        candidate_limit = max(top_k * 8, 50)
+        include_historical = bool(query.include_historical)
+        candidate_limit = max(top_k * (12 if include_historical else 8), 80 if include_historical else 50)
         semantic_hits: list[tuple[int, float]] = []
         keyword_hits: list[tuple[int, float]] = []
 
@@ -447,10 +497,14 @@ class InternalKnowledgeRetriever:
                 jurisdiction,
                 limit=candidate_limit,
                 query_vector=query_vector,
+                include_historical=include_historical,
             )
         if mode in ("keyword", "hybrid"):
             keyword_hits = self._keyword_search(
-                qtext, jurisdiction, limit=candidate_limit
+                qtext,
+                jurisdiction,
+                limit=candidate_limit,
+                include_historical=include_historical,
             )
 
         if mode == "semantic":
@@ -486,11 +540,16 @@ class InternalKnowledgeRetriever:
                 max_chunks_per_document=max_per_doc,
                 expand_adjacent=bool(query.expand_adjacent_chunks),
                 query_vector=query_vector,
+                include_historical=include_historical,
             )
             sem_score = {**sem_score, **extra_sem}
             kw_score = {**kw_score, **extra_kw}
         elif query.diversify_documents:
-            doc_map = self._chunk_document_map(ranked_ids)
+            doc_map = (
+                self._chunk_version_map(ranked_ids)
+                if include_historical
+                else self._chunk_document_map(ranked_ids)
+            )
             ordered_ids = diversify_by_document(
                 ranked_ids,
                 doc_map,
@@ -508,16 +567,26 @@ class InternalKnowledgeRetriever:
             sem_score=sem_score,
             kw_score=kw_score,
             expected_jurisdiction=jurisdiction,
+            include_historical=include_historical,
         )
 
         status = RetrievalStatus.OK if passages else RetrievalStatus.NO_RESULTS
+        msg = (
+            None
+            if passages
+            else (
+                "No matching chunks for jurisdiction (including historical versions)"
+                if include_historical
+                else "No matching current chunks for jurisdiction"
+            )
+        )
         return RetrievalResult(
             status=status,
             query=qtext,
             jurisdiction=jurisdiction,
             mode=mode,
             passages=passages,
-            message=None if passages else "No matching current chunks for jurisdiction",
+            message=msg,
             latency_ms=(time.perf_counter() - started) * 1000,
             warnings=warnings,
         )
@@ -607,6 +676,16 @@ class InternalKnowledgeRetriever:
         ).all()
         return {int(cid): int(doc_id) for cid, doc_id in rows}
 
+    def _chunk_version_map(self, chunk_ids: Sequence[int]) -> dict[int, int]:
+        if not chunk_ids:
+            return {}
+        rows = self.session.execute(
+            select(DocumentChunk.id, DocumentChunk.document_version_id).where(
+                DocumentChunk.id.in_(list(chunk_ids))
+            )
+        ).all()
+        return {int(cid): int(ver_id) for cid, ver_id in rows}
+
     def _document_aware_select(
         self,
         query: str,
@@ -619,33 +698,39 @@ class InternalKnowledgeRetriever:
         max_chunks_per_document: int,
         expand_adjacent: bool,
         query_vector: object | None = None,
+        include_historical: bool = False,
     ) -> tuple[list[int], dict[int, float], dict[int, float], dict[int, float]]:
-        """Two-stage selection: rank docs from the pool, then reselect passages.
+        """Two-stage selection: rank docs (or versions in historical mode), then reselect passages.
 
-        Returns ordered chunk ids, merged score map, and any extra semantic /
-        keyword scores discovered during within-document search.
+        When ``include_historical=True``, units are keyed by ``document_version_id``
+        so historical and current snapshots of the same document remain distinct
+        and adjacent expansion never crosses version boundaries.
         """
         if not ranked_ids:
             return [], score_map, {}, {}
 
-        doc_map = self._chunk_document_map(ranked_ids)
+        unit_map = (
+            self._chunk_version_map(ranked_ids)
+            if include_historical
+            else self._chunk_document_map(ranked_ids)
+        )
         doc_best: dict[int, float] = {}
         doc_first_rank: dict[int, int] = {}
         for rank, cid in enumerate(ranked_ids, start=1):
-            doc_id = doc_map.get(cid)
-            if doc_id is None:
+            unit_id = unit_map.get(cid)
+            if unit_id is None:
                 continue
             score = float(score_map.get(cid, 0.0))
-            if doc_id not in doc_best or score > doc_best[doc_id]:
-                doc_best[doc_id] = score
-            doc_first_rank.setdefault(doc_id, rank)
+            if unit_id not in doc_best or score > doc_best[unit_id]:
+                doc_best[unit_id] = score
+            doc_first_rank.setdefault(unit_id, rank)
 
-        # Prefer stronger document scores; stable tie-break by first appearance.
+        # Prefer stronger scores; stable tie-break by first appearance.
         document_ranks = sorted(
             doc_best.keys(),
             key=lambda d: (-doc_best[d], doc_first_rank.get(d, 10**9), d),
         )
-        # Bound within-doc work to the documents that can appear in top_k.
+        # Bound within-unit work to top units.
         doc_budget = min(len(document_ranks), top_k)
         document_ranks = document_ranks[: max(doc_budget, 1)]
 
@@ -665,25 +750,38 @@ class InternalKnowledgeRetriever:
                 "[" + ",".join(f"{float(x):.8f}" for x in vector.tolist()) + "]"
             )
 
-        for doc_id in document_ranks:
+        for unit_id in document_ranks:
             within_sem: list[tuple[int, float]] = []
             within_kw: list[tuple[int, float]] = []
-            # Passage selection inside a document prefers semantic similarity even
-            # for hybrid mode; keyword remains available for keyword-only mode and
-            # for provenance scores. Hybrid already chose the document via RRF.
             if mode in ("semantic", "hybrid") and query_vec_literal is not None:
-                within_sem = self._semantic_search_in_document(
-                    jurisdiction,
-                    document_id=doc_id,
-                    limit=within_limit,
-                    query_vec_literal=query_vec_literal,
-                )
+                if include_historical:
+                    within_sem = self._semantic_search_in_version(
+                        jurisdiction,
+                        version_id=unit_id,
+                        limit=within_limit,
+                        query_vec_literal=query_vec_literal,
+                    )
+                else:
+                    within_sem = self._semantic_search_in_document(
+                        jurisdiction,
+                        document_id=unit_id,
+                        limit=within_limit,
+                        query_vec_literal=query_vec_literal,
+                    )
                 for cid, score in within_sem:
                     extra_sem[cid] = score
             if mode == "keyword":
-                within_kw = self._keyword_search_in_document(
-                    query, jurisdiction, document_id=doc_id, limit=within_limit
-                )
+                if include_historical:
+                    within_kw = self._keyword_search_in_version(
+                        query,
+                        jurisdiction,
+                        version_id=unit_id,
+                        limit=within_limit,
+                    )
+                else:
+                    within_kw = self._keyword_search_in_document(
+                        query, jurisdiction, document_id=unit_id, limit=within_limit
+                    )
                 for cid, score in within_kw:
                     extra_kw[cid] = score
 
@@ -692,11 +790,8 @@ class InternalKnowledgeRetriever:
             else:
                 scored_map = {cid: score for cid, score in within_sem}
 
-            # Append pool-only chunks missing from the within-doc window so a
-            # shallow limit cannot drop a jurisdiction-pool hit entirely.
-            # Within-doc scores remain authoritative for ranking.
             for cid in ranked_ids:
-                if doc_map.get(cid) != doc_id or cid in scored_map:
+                if unit_map.get(cid) != unit_id or cid in scored_map:
                     continue
                 scored_map[cid] = float(score_map.get(cid, 0.0))
 
@@ -706,13 +801,11 @@ class InternalKnowledgeRetriever:
             if not scored:
                 continue
 
-            per_document_chunks[doc_id] = scored
+            per_document_chunks[unit_id] = scored
             for cid, score in scored:
                 merged_scores[cid] = float(score)
                 all_candidate_ids.add(cid)
 
-        # Adjacent expansion only considers neighbors already scored within-doc
-        # (same current version / document boundary preserved by the SQL filters).
         chunk_meta = self._chunk_index_heading_map(all_candidate_ids)
         ordered = select_document_aware_passages(
             document_ranks,
@@ -776,6 +869,39 @@ class InternalKnowledgeRetriever:
         ).all()
         return [(int(r[0]), float(r[1])) for r in rows]
 
+    def _semantic_search_in_version(
+        self,
+        jurisdiction: str,
+        *,
+        version_id: int,
+        limit: int,
+        query_vec_literal: str,
+    ) -> list[tuple[int, float]]:
+        sql = text(
+            """
+            SELECT c.id AS chunk_id,
+                   1 - (e.embedding <=> CAST(:qvec AS vector)) AS score
+            FROM document_chunk_embeddings e
+            JOIN document_chunks c ON c.id = e.chunk_id
+            WHERE e.embedding_model_id = :model_id
+              AND c.jurisdiction_code = :jurisdiction
+              AND c.document_version_id = :version_id
+            ORDER BY e.embedding <=> CAST(:qvec AS vector) ASC, c.id ASC
+            LIMIT :lim
+            """
+        )
+        rows = self.session.execute(
+            sql,
+            {
+                "qvec": query_vec_literal,
+                "model_id": self.embedding_model_id,
+                "jurisdiction": jurisdiction,
+                "version_id": version_id,
+                "lim": limit,
+            },
+        ).all()
+        return [(int(r[0]), float(r[1])) for r in rows]
+
     def _keyword_search_in_document(
         self,
         query: str,
@@ -808,6 +934,37 @@ class InternalKnowledgeRetriever:
         ).all()
         return [(int(r[0]), float(r[1])) for r in rows]
 
+    def _keyword_search_in_version(
+        self,
+        query: str,
+        jurisdiction: str,
+        *,
+        version_id: int,
+        limit: int,
+    ) -> list[tuple[int, float]]:
+        sql = text(
+            """
+            SELECT c.id AS chunk_id,
+                   ts_rank_cd(c.search_tsv, plainto_tsquery('english', :q)) AS score
+            FROM document_chunks c
+            WHERE c.jurisdiction_code = :jurisdiction
+              AND c.document_version_id = :version_id
+              AND c.search_tsv @@ plainto_tsquery('english', :q)
+            ORDER BY score DESC, c.id ASC
+            LIMIT :lim
+            """
+        )
+        rows = self.session.execute(
+            sql,
+            {
+                "q": query,
+                "jurisdiction": jurisdiction,
+                "version_id": version_id,
+                "lim": limit,
+            },
+        ).all()
+        return [(int(r[0]), float(r[1])) for r in rows]
+
     def _semantic_search(
         self,
         query: str,
@@ -815,6 +972,7 @@ class InternalKnowledgeRetriever:
         *,
         limit: int,
         query_vector: object | None = None,
+        include_historical: bool = False,
     ) -> list[tuple[int, float]]:
         vector = (
             query_vector
@@ -822,15 +980,16 @@ class InternalKnowledgeRetriever:
             else self.embedder.embed_queries([query]).vectors[0]
         )
         vec_literal = "[" + ",".join(f"{float(x):.8f}" for x in vector.tolist()) + "]"
+        cur_filter = "" if include_historical else "AND c.is_current_version IS TRUE"
         # Cosine distance via pgvector; similarity = 1 - distance for unit vectors.
         sql = text(
-            """
+            f"""
             SELECT c.id AS chunk_id,
                    1 - (e.embedding <=> CAST(:qvec AS vector)) AS score
             FROM document_chunk_embeddings e
             JOIN document_chunks c ON c.id = e.chunk_id
             WHERE e.embedding_model_id = :model_id
-              AND c.is_current_version IS TRUE
+              {cur_filter}
               AND c.jurisdiction_code = :jurisdiction
             ORDER BY e.embedding <=> CAST(:qvec AS vector) ASC, c.id ASC
             LIMIT :lim
@@ -848,14 +1007,21 @@ class InternalKnowledgeRetriever:
         return [(int(r[0]), float(r[1])) for r in rows]
 
     def _keyword_search(
-        self, query: str, jurisdiction: str, *, limit: int
+        self,
+        query: str,
+        jurisdiction: str,
+        *,
+        limit: int,
+        include_historical: bool = False,
     ) -> list[tuple[int, float]]:
+        cur_filter = "" if include_historical else "AND c.is_current_version IS TRUE"
         sql = text(
-            """
+            f"""
             SELECT c.id AS chunk_id,
                    ts_rank_cd(c.search_tsv, plainto_tsquery('english', :q)) AS score
             FROM document_chunks c
-            WHERE c.is_current_version IS TRUE
+            WHERE 1=1
+              {cur_filter}
               AND c.jurisdiction_code = :jurisdiction
               AND c.search_tsv @@ plainto_tsquery('english', :q)
             ORDER BY score DESC, c.id ASC
@@ -868,6 +1034,17 @@ class InternalKnowledgeRetriever:
         ).all()
         return [(int(r[0]), float(r[1])) for r in rows]
 
+    @staticmethod
+    def _has_temporal_version_columns(session: Session) -> bool:
+        try:
+            cols = {
+                c["name"]
+                for c in inspect(session.get_bind()).get_columns("document_versions")
+            }
+            return "legal_status" in cols and "source_published_at" in cols
+        except Exception:  # noqa: BLE001
+            return False
+
     def _hydrate_passages(
         self,
         chunk_ids: Sequence[int],
@@ -878,40 +1055,157 @@ class InternalKnowledgeRetriever:
         sem_score: dict[int, float],
         kw_score: dict[int, float],
         expected_jurisdiction: str,
+        include_historical: bool = False,
     ) -> list[RetrievedPassage]:
         if not chunk_ids:
             return []
-        stmt = (
-            select(
-                DocumentChunk,
-                Document.canonical_url,
+        has_temporal_cols = self._has_temporal_version_columns(self.session)
+        resolved_auth_id = func.coalesce(Document.authority_id, Source.authority_id)
+        if has_temporal_cols:
+            stmt = (
+                select(
+                    DocumentChunk,
+                    Document.canonical_url,
+                    Document.title,
+                    Document.language,
+                    Document.content_kind,
+                    Source.name,
+                    Source.default_language,
+                    Authority.id,
+                    Authority.name,
+                    DocumentVersion.version_number,
+                    DocumentVersion.fetched_via_source_id,
+                    DocumentVersion.language,
+                    DocumentVersion.content_sha256,
+                    DocumentVersion.retrieved_at,
+                    DocumentVersion.last_checked_at,
+                    DocumentVersion.http_last_modified,
+                    DocumentVersion.source_published_at,
+                    DocumentVersion.source_updated_at,
+                    DocumentVersion.legal_status,
+                    DocumentVersion.temporal_notes,
+                )
+                .join(Document, Document.id == DocumentChunk.document_id)
+                .outerjoin(Source, Source.id == DocumentChunk.source_id)
+                .outerjoin(Authority, Authority.id == resolved_auth_id)
+                .outerjoin(
+                    DocumentVersion,
+                    DocumentVersion.id == DocumentChunk.document_version_id,
+                )
+                .where(DocumentChunk.id.in_(list(chunk_ids)))
             )
-            .join(Document, Document.id == DocumentChunk.document_id)
-            .where(DocumentChunk.id.in_(list(chunk_ids)))
-        )
-        rows = self.session.execute(stmt).all()
-        by_id: dict[int, tuple[DocumentChunk, str]] = {
-            int(chunk.id): (chunk, str(url)) for chunk, url in rows
-        }
+            rows = self.session.execute(stmt).all()
+            by_id: dict[int, tuple[Any, ...]] = {
+                int(row[0].id): row for row in rows
+            }
+        else:
+            stmt = (
+                select(
+                    DocumentChunk,
+                    Document.canonical_url,
+                    Document.title,
+                    Document.language,
+                    Document.content_kind,
+                    Source.name,
+                    Source.default_language,
+                    Authority.id,
+                    Authority.name,
+                    DocumentVersion.version_number,
+                    DocumentVersion.fetched_via_source_id,
+                    DocumentVersion.language,
+                    DocumentVersion.content_sha256,
+                    DocumentVersion.retrieved_at,
+                    DocumentVersion.last_checked_at,
+                )
+                .join(Document, Document.id == DocumentChunk.document_id)
+                .outerjoin(Source, Source.id == DocumentChunk.source_id)
+                .outerjoin(Authority, Authority.id == resolved_auth_id)
+                .outerjoin(
+                    DocumentVersion,
+                    DocumentVersion.id == DocumentChunk.document_version_id,
+                )
+                .where(DocumentChunk.id.in_(list(chunk_ids)))
+            )
+            rows = self.session.execute(stmt).all()
+            by_id = {
+                int(row[0].id): (
+                    *row,
+                    None,
+                    None,
+                    None,
+                    "unknown",
+                    None,
+                )
+                for row in rows
+            }
+
         passages: list[RetrievedPassage] = []
         for cid in chunk_ids:
-            item = by_id.get(cid)
-            if item is None:
+            row = by_id.get(cid)
+            if row is None:
                 continue
-            chunk, url = item
+            (
+                chunk,
+                url,
+                doc_title,
+                doc_lang,
+                content_kind,
+                source_name,
+                source_default_lang,
+                authority_id,
+                authority_name,
+                version_number,
+                fetched_via_source_id,
+                version_lang,
+                version_sha256,
+                retrieved_at,
+                last_checked_at,
+                http_last_modified,
+                source_published_at,
+                source_updated_at,
+                legal_status,
+                temporal_notes,
+            ) = row
             if chunk.jurisdiction_code != expected_jurisdiction:
                 continue
-            if not chunk.is_current_version:
+            if not include_historical and not chunk.is_current_version:
                 continue
+            resolved_lang = next(
+                (
+                    str(v).strip()
+                    for v in (version_lang, doc_lang, source_default_lang)
+                    if isinstance(v, str) and v.strip()
+                ),
+                None,
+            )
             passages.append(
                 RetrievedPassage(
                     chunk_id=int(chunk.id),
                     document_id=int(chunk.document_id),
                     document_version_id=int(chunk.document_version_id),
                     source_id=int(chunk.source_id),
+                    source_name=source_name,
+                    authority_id=int(authority_id) if authority_id is not None else None,
+                    authority_name=authority_name,
+                    fetched_via_source_id=(
+                        int(fetched_via_source_id)
+                        if fetched_via_source_id is not None
+                        else None
+                    ),
+                    version_number=(
+                        int(version_number) if version_number is not None else None
+                    ),
+                    chunk_index=int(chunk.chunk_index),
+                    char_start=chunk.char_start,
+                    char_end=chunk.char_end,
+                    chunk_content_sha256=chunk.content_sha256,
+                    version_content_sha256=version_sha256,
+                    language=resolved_lang,
+                    content_kind=content_kind,
                     jurisdiction_code=chunk.jurisdiction_code,
-                    official_url=url,
+                    official_url=str(url),
                     heading_path=chunk.heading_path,
+                    title=doc_title,
                     content_text=chunk.content_text,
                     score=float(score_map.get(cid, 0.0)),
                     semantic_rank=sem_rank.get(cid),
@@ -920,6 +1214,20 @@ class InternalKnowledgeRetriever:
                     keyword_score=kw_score.get(cid),
                     pathway_id=chunk.pathway_id,
                     requirement_category=chunk.requirement_category,
+                    is_current_version=bool(chunk.is_current_version),
+                    retrieved_at=retrieved_at.isoformat() if retrieved_at else None,
+                    last_checked_at=last_checked_at.isoformat() if last_checked_at else None,
+                    http_last_modified=(
+                        http_last_modified.isoformat() if http_last_modified else None
+                    ),
+                    source_published_at=(
+                        source_published_at.isoformat() if source_published_at else None
+                    ),
+                    source_updated_at=(
+                        source_updated_at.isoformat() if source_updated_at else None
+                    ),
+                    legal_status=legal_status or "unknown",
+                    temporal_notes=temporal_notes,
                 )
             )
         return passages

@@ -9,13 +9,17 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
 from lifepilot.agent.evidence import EvidenceItem
+from lifepilot.agent.temporal_dates import (
+    EffectiveDateMention,
+    extract_effective_date_mentions,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_FRESHNESS_POLICY = ROOT / "config" / "freshness" / "source_freshness_policy.json"
@@ -97,6 +101,10 @@ class ReconciliationNotes:
     warnings: list[str] = field(default_factory=list)
     missing_information: list[str] = field(default_factory=list)
     future_effective_mentions: list[str] = field(default_factory=list)
+    expired_mentions: list[str] = field(default_factory=list)
+    ambiguous_date_mentions: list[str] = field(default_factory=list)
+    unresolved_boundary_mentions: list[str] = field(default_factory=list)
+    mentions: list[EffectiveDateMention] = field(default_factory=list)
 
 
 @lru_cache(maxsize=1)
@@ -265,12 +273,15 @@ def decide_retrieval(
     freshness: FreshnessAssessment | None = None,
     has_numeric_conflict: bool = False,
     connectors_available: bool = True,
+    temporal_mode: str = "current",
+    historical_connectors_available: bool = False,
 ) -> RetrievalPolicyDecision:
     mode = (
         external_mode
         if isinstance(external_mode, ExternalMode)
         else ExternalMode(str(external_mode).strip().lower())
     )
+    t_mode = (temporal_mode or "current").strip().lower()
     if mode == ExternalMode.OFF:
         return RetrievalPolicyDecision(
             decision=RetrievalDecision.INTERNAL_ONLY,
@@ -278,6 +289,12 @@ def decide_retrieval(
             run_external=False,
         )
     if mode == ExternalMode.ON:
+        if t_mode == "historical" and not historical_connectors_available:
+            return RetrievalPolicyDecision(
+                decision=RetrievalDecision.INTERNAL_ONLY,
+                reasons=("historical_as_of_date_blocks_live_current_connectors",),
+                run_external=False,
+            )
         return RetrievalPolicyDecision(
             decision=RetrievalDecision.INTERNAL_PLUS_EXTERNAL,
             reasons=("external_mode=on",),
@@ -299,7 +316,10 @@ def decide_retrieval(
     stale = bool(freshness and freshness.stale)
     salary_or_fee = any(c in high_risk for c in ("salary_threshold", "application_fee"))
     change_risk = "regulatory_change" in high_risk
-    historical = bool(_HISTORICAL_RE.search(question or "")) and not change_risk
+    explicit_historical = t_mode == "historical"
+    historical = explicit_historical or (
+        bool(_HISTORICAL_RE.search(question or "")) and not change_risk
+    )
 
     if thin:
         reasons.append("insufficient_internal_evidence")
@@ -311,10 +331,32 @@ def decide_retrieval(
         reasons.extend(queue_reasons)
     if has_numeric_conflict:
         reasons.append("internal_external_or_prior_numeric_conflict")
-    if change_risk:
+    if change_risk and not explicit_historical:
         reasons.append("question_implies_current_or_changed_rules")
-    if historical:
+    if explicit_historical:
+        reasons.append("explicit_historical_as_of_date_blocks_current_connectors")
+    elif historical:
         reasons.append("historical_question_prefer_internal_evidence")
+
+    # Explicit historical queries never invoke current-page external connectors.
+    # Only date-filterable historical connectors (when explicitly available) may run.
+    if explicit_historical:
+        if historical_connectors_available and (thin or salary_or_fee):
+            return RetrievalPolicyDecision(
+                decision=RetrievalDecision.INTERNAL_PLUS_EXTERNAL,
+                reasons=tuple(reasons + ["date_filtered_historical_connector"]),
+                high_risk_categories=tuple(high_risk),
+                freshness=freshness,
+                run_external=True,
+                require_verification=False,
+            )
+        return RetrievalPolicyDecision(
+            decision=RetrievalDecision.INTERNAL_ONLY,
+            reasons=tuple(reasons),
+            high_risk_categories=tuple(high_risk),
+            freshness=freshness,
+            run_external=False,
+        )
 
     # Live connectors typically return current pages; prefer curated historical
     # evidence when the question is clearly about a past rule.
@@ -379,18 +421,42 @@ def reconcile_effective_dates(
     evidence: list[EvidenceItem],
     *,
     now: datetime | None = None,
+    reference_date: date | None = None,
 ) -> ReconciliationNotes:
-    """Conservative scan for future-effective language; never invent dates."""
+    """Evaluate exact and partial date boundaries against ``reference_date``.
+
+    Never invents missing day/month boundaries or guesses ambiguous numeric dates.
+    """
     notes = ReconciliationNotes()
-    now = now or datetime.now(timezone.utc)
-    year_now = now.year
+    now_dt = now or datetime.now(timezone.utc)
+    ref_date = reference_date or now_dt.date()
     for item in evidence:
+        # Skip curated rules already evaluated deterministically by query_reviewed_legal_rules.
+        if item.source_type.value == "curated_rule":
+            continue
         text = item.passage_text or ""
-        for match in _FUTURE_EFFECTIVE_RE.finditer(text):
-            snippet = match.group(0)
-            years = [int(y) for y in _YEAR_RE.findall(snippet)]
-            if years and max(years) > year_now:
-                notes.future_effective_mentions.append(snippet[:120])
+        found = extract_effective_date_mentions(text, reference_date=ref_date)
+        for m in found:
+            notes.mentions.append(m)
+            if m.ambiguous:
+                notes.ambiguous_date_mentions.append(m.raw_snippet)
+                notes.warnings.append(
+                    f"ambiguous_date_format_detected:{m.date_literal}:do_not_guess_day_month"
+                )
+                notes.missing_information.append(
+                    "unambiguous_effective_date_confirmation"
+                )
+                continue
+            if m.boundary_unresolved:
+                notes.unresolved_boundary_mentions.append(m.raw_snippet)
+                notes.warnings.append(
+                    f"unresolved_date_boundary:{m.date_literal}:exact_day_unspecified"
+                )
+                notes.missing_information.append(
+                    "effective_date_confirmation_for_cited_requirement"
+                )
+            if m.is_future_for_reference:
+                notes.future_effective_mentions.append(m.raw_snippet)
                 notes.warnings.append(
                     "future_effective_language_detected:"
                     "do_not_treat_as_currently_applicable"
@@ -398,7 +464,16 @@ def reconcile_effective_dates(
                 notes.missing_information.append(
                     "effective_date_confirmation_for_cited_requirement"
                 )
-    # Deduplicate warnings
+            if m.is_expired_for_reference:
+                notes.expired_mentions.append(m.raw_snippet)
+                notes.warnings.append(
+                    "expired_or_sunset_date_detected:"
+                    "rule_may_no_longer_apply_on_reference_date"
+                )
+                notes.missing_information.append(
+                    "confirmation_that_sunset_rule_still_applies"
+                )
+
     notes.warnings = list(dict.fromkeys(notes.warnings))
     notes.missing_information = list(dict.fromkeys(notes.missing_information))
     return notes

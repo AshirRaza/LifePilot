@@ -12,6 +12,7 @@ from lifepilot.db.models import (
     DocumentVersion,
     EmbeddingModel,
     Jurisdiction,
+    LegalRule,
     Source,
 )
 from lifepilot.db.session import get_engine, get_session_factory
@@ -28,6 +29,7 @@ __all__ = [
     "DocumentVersion",
     "EmbeddingModel",
     "Jurisdiction",
+    "LegalRule",
     "Source",
     "get_engine",
     "get_session_factory",

@@ -18,24 +18,27 @@ successful structured extractions, not raw bytes alone.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, Optional
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     Text,
     UniqueConstraint,
     func,
     text,
 )
 from pgvector.sqlalchemy import Vector
-from sqlalchemy.dialects.postgresql import ARRAY, CHAR, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, CHAR, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from lifepilot.db.base import Base
@@ -82,6 +85,113 @@ RAG_REQUIREMENT_CATEGORIES = (
     "application_process",
     "financial_or_sponsorship",
     "official_provenance",
+)
+
+# Controlled legal-status classifications for retrieved document versions.
+# Never treat HTTP headers, retrieved_at, or is_current as legal effective dates.
+DOCUMENT_LEGAL_STATUSES = (
+    "unknown",
+    "in_force",
+    "historical",
+    "superseded",
+    "future_pending",
+    "proposed",
+    "withdrawn",
+    "archived",
+    "transitional",
+)
+
+LEGAL_RULE_REQUIREMENT_CATEGORIES = (
+    "eligibility",
+    "required_documents",
+    "application_process",
+    "financial_or_sponsorship",
+    "fees_costs",
+    "conditions_duration",
+    "language_requirements",
+    "health_character",
+    "dependents",
+    "work_rights",
+    "processing_times",
+    "official_provenance",
+)
+
+LEGAL_RULE_TYPES = (
+    "salary_threshold",
+    "maintenance_funds",
+    "application_fee",
+    "surcharge",
+    "income_threshold",
+    "language_level",
+    "work_hours_limit",
+    "duration_limit",
+    "residence_period",
+    "age_limit",
+    "eligibility_condition",
+    "exemption",
+    "transitional_rule",
+    "document_requirement",
+    "process_step",
+    "other",
+)
+
+LEGAL_RULE_UNITS = (
+    "yearly",
+    "monthly",
+    "weekly",
+    "daily",
+    "hourly",
+    "one_time",
+    "hours_per_week",
+    "days",
+    "months",
+    "years",
+    "percent",
+    "points",
+    "count",
+    "other",
+)
+
+LEGAL_RULE_COMPARATORS = ("gte", "gt", "lte", "lt", "eq")
+
+LEGAL_RULE_EFFECTIVE_DATE_STATUSES = (
+    "unknown",
+    "partially_known",
+    "known_bounded",
+    "known_open_ended",
+    "announced_future",
+    "superseded",
+    "expired",
+)
+
+LEGAL_RULE_COHORT_CATEGORIES = (
+    "general",
+    "transitional",
+    "age_based",
+    "qualification_based",
+    "new_entrant",
+    "occupation_or_sector",
+    "location_based",
+    "sponsorship_or_route_history",
+    "exemption",
+    "other",
+)
+
+LEGAL_RULE_REVIEW_STATUSES = (
+    "unreviewed",
+    "pending_review",
+    "approved",
+    "rejected",
+    "clarification_requested",
+    "stale_pending_review",
+)
+
+LEGAL_RULE_VERIFICATION_STATUSES = (
+    "unverified",
+    "machine_extracted_unverified",
+    "human_verified",
+    "disputed",
+    "potentially_outdated",
 )
 
 
@@ -269,6 +379,20 @@ class DocumentVersion(Base):
         UniqueConstraint(
             "document_id", "version_number", name="uq_document_versions_document_version"
         ),
+        CheckConstraint(
+            "legal_status IN ("
+            + ", ".join(f"'{s}'" for s in DOCUMENT_LEGAL_STATUSES)
+            + ")",
+            name="ck_document_versions_legal_status",
+        ),
+        CheckConstraint(
+            "superseded_by_version_id IS NULL OR superseded_by_version_id <> id",
+            name="ck_document_versions_not_self_superseded",
+        ),
+        CheckConstraint(
+            "http_etag IS NULL OR length(trim(http_etag)) > 0",
+            name="ck_document_versions_http_etag_nonempty",
+        ),
         # At most one current version per document (PostgreSQL partial unique index).
         Index(
             "uq_document_versions_one_current",
@@ -279,6 +403,9 @@ class DocumentVersion(Base):
         Index("ix_document_versions_document_retrieved", "document_id", "retrieved_at"),
         Index("ix_document_versions_content_sha256", "content_sha256"),
         Index("ix_document_versions_fetched_via_source_id", "fetched_via_source_id"),
+        Index("ix_document_versions_legal_status", "legal_status"),
+        Index("ix_document_versions_superseded_by_version_id", "superseded_by_version_id"),
+        Index("ix_document_versions_source_updated_at", "source_updated_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -297,6 +424,31 @@ class DocumentVersion(Base):
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Observed source / HTTP timestamps (never treated as legal effective dates).
+    http_last_modified: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    http_etag: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_published_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Source-level legal classification (distinct from crawl currency is_current).
+    legal_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="unknown", server_default=text("'unknown'")
+    )
+    archived_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    superseded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    superseded_by_version_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=True
+    )
+    temporal_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     content_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     byte_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
@@ -314,6 +466,14 @@ class DocumentVersion(Base):
     )
     extractions: Mapped[list["DocumentExtraction"]] = relationship(
         back_populates="document_version"
+    )
+    superseded_by_version: Mapped[Optional["DocumentVersion"]] = relationship(
+        remote_side="DocumentVersion.id",
+        foreign_keys=[superseded_by_version_id],
+    )
+    legal_rules: Mapped[list["LegalRule"]] = relationship(
+        back_populates="document_version",
+        foreign_keys="LegalRule.document_version_id",
     )
 
 
@@ -737,3 +897,273 @@ class DocumentChunkEmbedding(Base):
 
     chunk: Mapped[DocumentChunk] = relationship(back_populates="embeddings")
     embedding_model: Mapped[EmbeddingModel] = relationship(back_populates="embeddings")
+
+
+class LegalRule(Base):
+    """Curated, temporally scoped immigration requirement or threshold rule.
+
+    Each row represents one temporal/cohort revision of a rule identified by
+    ``(rule_key, rule_revision)``. Multiple coexisting thresholds for different
+    applicant cohorts (e.g., general vs. pre-cutoff transitional) are stored
+    without colliding uniqueness constraints on pathway/category/date.
+
+    Unknown effective dates (``effective_date_status='unknown'``) must not be
+    treated as universally applicable. Referencing an official source/version
+    never implies ``human_verified``; human verification requires explicit
+    approval metadata and a pinned ``document_version_id``.
+    """
+
+    __tablename__ = "legal_rules"
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_key",
+            "rule_revision",
+            name="uq_legal_rules_key_revision",
+        ),
+        CheckConstraint(
+            "rule_key ~ '^[a-z0-9][a-z0-9_.-]*$'",
+            name="ck_legal_rules_rule_key",
+        ),
+        CheckConstraint(
+            "rule_revision >= 1",
+            name="ck_legal_rules_rule_revision",
+        ),
+        CheckConstraint(
+            "supersedes_rule_id IS NULL OR supersedes_rule_id <> id",
+            name="ck_legal_rules_not_self_superseded",
+        ),
+        CheckConstraint(
+            "length(trim(jurisdiction_code)) > 0",
+            name="ck_legal_rules_jurisdiction_code_nonempty",
+        ),
+        CheckConstraint(
+            "pathway_id IS NULL OR pathway_id ~ '^[a-z][a-z0-9_]*$'",
+            name="ck_legal_rules_pathway_id",
+        ),
+        CheckConstraint(
+            "requirement_category IN ("
+            + ", ".join(f"'{c}'" for c in LEGAL_RULE_REQUIREMENT_CATEGORIES)
+            + ")",
+            name="ck_legal_rules_requirement_category",
+        ),
+        CheckConstraint(
+            "requirement_type IN ("
+            + ", ".join(f"'{t}'" for t in LEGAL_RULE_TYPES)
+            + ")",
+            name="ck_legal_rules_requirement_type",
+        ),
+        CheckConstraint(
+            "numeric_value IS NULL OR numeric_value >= 0",
+            name="ck_legal_rules_numeric_nonnegative",
+        ),
+        CheckConstraint(
+            "numeric_comparator IS NULL OR numeric_comparator IN ("
+            + ", ".join(f"'{c}'" for c in LEGAL_RULE_COMPARATORS)
+            + ")",
+            name="ck_legal_rules_numeric_comparator",
+        ),
+        CheckConstraint(
+            "numeric_max_value IS NULL OR (numeric_value IS NOT NULL AND numeric_max_value >= numeric_value)",
+            name="ck_legal_rules_numeric_range",
+        ),
+        CheckConstraint(
+            "currency_code IS NULL OR (currency_code ~ '^[A-Z]{3}$' AND numeric_value IS NOT NULL)",
+            name="ck_legal_rules_currency_code",
+        ),
+        CheckConstraint(
+            "amount_unit IS NULL OR (amount_unit IN ("
+            + ", ".join(f"'{u}'" for u in LEGAL_RULE_UNITS)
+            + ") AND numeric_value IS NOT NULL)",
+            name="ck_legal_rules_amount_unit",
+        ),
+        CheckConstraint(
+            "effective_date_status IN ("
+            + ", ".join(f"'{s}'" for s in LEGAL_RULE_EFFECTIVE_DATE_STATUSES)
+            + ")",
+            name="ck_legal_rules_effective_date_status",
+        ),
+        CheckConstraint(
+            "effective_date_status <> 'unknown' OR (effective_from IS NULL AND effective_to IS NULL)",
+            name="ck_legal_rules_unknown_effective_dates",
+        ),
+        CheckConstraint(
+            "effective_date_status NOT IN ('known_bounded', 'known_open_ended', 'announced_future') "
+            "OR effective_from IS NOT NULL",
+            name="ck_legal_rules_known_from_date",
+        ),
+        CheckConstraint(
+            "effective_date_status <> 'known_bounded' OR effective_to IS NOT NULL",
+            name="ck_legal_rules_known_to_date",
+        ),
+        CheckConstraint(
+            "effective_from IS NULL OR effective_to IS NULL OR ("
+            "(effective_from_inclusive AND effective_to_inclusive AND effective_to >= effective_from) "
+            "OR ((NOT effective_from_inclusive OR NOT effective_to_inclusive) AND effective_to > effective_from)"
+            ")",
+            name="ck_legal_rules_effective_bounds_order",
+        ),
+        CheckConstraint(
+            "cohort_key ~ '^[a-z0-9][a-z0-9_.-]*$'",
+            name="ck_legal_rules_cohort_key",
+        ),
+        CheckConstraint(
+            "cohort_category IN ("
+            + ", ".join(f"'{c}'" for c in LEGAL_RULE_COHORT_CATEGORIES)
+            + ")",
+            name="ck_legal_rules_cohort_category",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(cohort_conditions) = 'object'",
+            name="ck_legal_rules_cohort_conditions_object",
+        ),
+        CheckConstraint(
+            "length(trim(rule_summary)) > 0",
+            name="ck_legal_rules_rule_summary_nonempty",
+        ),
+        CheckConstraint(
+            "document_version_id IS NOT NULL OR document_id IS NOT NULL OR source_id IS NOT NULL",
+            name="ck_legal_rules_requires_source_provenance",
+        ),
+        CheckConstraint(
+            "review_status IN ("
+            + ", ".join(f"'{s}'" for s in LEGAL_RULE_REVIEW_STATUSES)
+            + ")",
+            name="ck_legal_rules_review_status",
+        ),
+        CheckConstraint(
+            "verification_status IN ("
+            + ", ".join(f"'{s}'" for s in LEGAL_RULE_VERIFICATION_STATUSES)
+            + ")",
+            name="ck_legal_rules_verification_status",
+        ),
+        CheckConstraint(
+            "verification_status <> 'human_verified' OR ("
+            "review_status = 'approved' "
+            "AND reviewed_by IS NOT NULL "
+            "AND length(trim(reviewed_by)) > 0 "
+            "AND reviewed_at IS NOT NULL "
+            "AND document_version_id IS NOT NULL"
+            ")",
+            name="ck_legal_rules_human_verified_requires_audit",
+        ),
+        Index(
+            "ix_legal_rules_lookup",
+            "jurisdiction_code",
+            "pathway_id",
+            "requirement_category",
+            "effective_from",
+            "effective_to",
+        ),
+        Index("ix_legal_rules_rule_key", "rule_key"),
+        Index("ix_legal_rules_document_version_id", "document_version_id"),
+        Index("ix_legal_rules_document_id", "document_id"),
+        Index("ix_legal_rules_source_id", "source_id"),
+        Index("ix_legal_rules_verification_status", "verification_status", "review_status"),
+        Index("ix_legal_rules_effective_dates", "effective_from", "effective_to"),
+        Index("ix_legal_rules_cohort", "pathway_id", "cohort_key"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    rule_key: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    supersedes_rule_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("legal_rules.id"), nullable=True
+    )
+    jurisdiction_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jurisdictions.id"), nullable=False
+    )
+    # Denormalized from jurisdictions.code; kept consistent by DB trigger.
+    jurisdiction_code: Mapped[str] = mapped_column(Text, nullable=False)
+    pathway_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requirement_category: Mapped[str] = mapped_column(Text, nullable=False)
+    requirement_type: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Exact quantitative requirements (never float).
+    numeric_value: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4, asdecimal=True), nullable=True
+    )
+    numeric_max_value: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4, asdecimal=True), nullable=True
+    )
+    numeric_comparator: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    currency_code: Mapped[Optional[str]] = mapped_column(CHAR(3), nullable=True)
+    amount_unit: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Legal applicability window (explicitly distinct from crawl/publication dates).
+    effective_from: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    effective_from_inclusive: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    effective_to_inclusive: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    effective_date_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="unknown", server_default=text("'unknown'")
+    )
+
+    # Cohort / transitional applicability.
+    cohort_key: Mapped[str] = mapped_column(
+        Text, nullable=False, default="general", server_default=text("'general'")
+    )
+    cohort_category: Mapped[str] = mapped_column(
+        Text, nullable=False, default="general", server_default=text("'general'")
+    )
+    is_transitional: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    cohort_conditions: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    rule_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    conditions_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Official-source provenance.
+    source_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("sources.id"), nullable=True
+    )
+    document_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("documents.id"), nullable=True
+    )
+    document_version_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=True
+    )
+    source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    supporting_excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Governance & verification state (fail-closed defaults).
+    review_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="unreviewed", server_default=text("'unreviewed'")
+    )
+    verification_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="unverified", server_default=text("'unverified'")
+    )
+    reviewed_by: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    verification_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    jurisdiction: Mapped[Jurisdiction] = relationship()
+    source: Mapped[Optional[Source]] = relationship()
+    document: Mapped[Optional[Document]] = relationship()
+    document_version: Mapped[Optional[DocumentVersion]] = relationship(
+        back_populates="legal_rules",
+        foreign_keys=[document_version_id],
+    )
+    supersedes_rule: Mapped[Optional["LegalRule"]] = relationship(
+        remote_side="LegalRule.id",
+        foreign_keys=[supersedes_rule_id],
+    )

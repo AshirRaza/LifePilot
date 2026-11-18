@@ -18,7 +18,7 @@ from lifepilot.external.models import (
     RetrievalStatus,
     SourceType,
 )
-from lifepilot.external.textutil import extract_passages
+from lifepilot.external.textutil import extract_passages_with_truncation
 
 SEARCH_URL = "https://www.federalregister.gov/api/v1/documents.json"
 ALLOWED_HOSTS = frozenset({"www.federalregister.gov"})
@@ -114,7 +114,7 @@ class UsFederalRegisterConnector(ExternalConnector):
             if isinstance(a, dict):
                 agencies.append(a.get("name") or a.get("raw_name") or a.get("slug"))
         legal_status = _legal_status(doc_type, doc)
-        passages = extract_passages(
+        passages, truncated = extract_passages_with_truncation(
             f"{title}\n{abstract}\n"
             f"Document type: {doc_type}. "
             "Federal Register entries are not a complete eligibility assessment."
@@ -131,14 +131,16 @@ class UsFederalRegisterConnector(ExternalConnector):
             requirement=query.requirement,
             passages=passages,
             published_at=_as_str(doc.get("publication_date")),
-            effective_at=_as_str(doc.get("effective_on") or doc.get("dates")),
-            language="en",
+            effective_at=_as_str(doc.get("effective_on")),
+            language="en-US",
             license="U.S. government work / Federal Register reuse terms",
             legal_status=legal_status,
             metadata={
                 "type": doc_type,
                 "agencies": agencies,
+                "dates_text": _as_str(doc.get("dates")),
                 "pdf_url": doc.get("pdf_url"),
+                "has_truncated_passages": truncated,
                 "warning": (
                     "Proposed rules and notices are not the same as currently "
                     "effective eligibility requirements."

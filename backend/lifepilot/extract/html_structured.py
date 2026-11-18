@@ -14,6 +14,11 @@ from typing import Any
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from lifepilot.db.temporal import (
+    TemporalDateObservation,
+    parse_source_datetime,
+    resolve_temporal_observations,
+)
 from lifepilot.extract.schema import (
     SCHEMA_VERSION,
     ContentBlock,
@@ -593,15 +598,300 @@ def _embedded_adds_requirement_guidance(
     )
 
 
+_HTML_META_PUBLISHED_KEYS = frozenset(
+    {
+        "article:published_time",
+        "og:article:published_time",
+        "dcterms.issued",
+        "dc.date.issued",
+        "govuk:first-published-at",
+        "publication_date",
+        "publishdate",
+        "pubdate",
+        "dcterms.created",
+        "dc.date",
+        "date",
+    }
+)
+_HTML_META_UPDATED_KEYS = frozenset(
+    {
+        "article:modified_time",
+        "og:updated_time",
+        "article:modified",
+        "dcterms.modified",
+        "dc.date.modified",
+        "govuk:updated-at",
+        "last-modified",
+        "revised",
+    }
+)
+_JSONLD_PUBLISHED_KEYS = ("datePublished", "dateCreated")
+_JSONLD_UPDATED_KEYS = ("dateModified",)
+_BANNER_DATE_CLASSES_IDS = (
+    "mom-last-updated",
+    "documentlastupdated",
+    "gem-c-published-dates",
+    "app-c-published-dates",
+    "gem-c-metadata",
+    "last-updated",
+    "lastupdated",
+    "published-date",
+    "date-published",
+    "date-modified",
+    "modified-date",
+    "page-updated",
+    "node-updated",
+)
+_BANNER_LINE_RE = re.compile(
+    r"(?i)\b(first\s+published|published(?:\s+on)?|last\s+updated|updated(?:\s+on)?|last\s+reviewed)\s*[:\-]?\s*([A-Za-z0-9,:\-+TZ/ ]{6,48})$"
+)
+
+
+def _walk_jsonld_dates(
+    obj: Any,
+    observations: list[TemporalDateObservation],
+    *,
+    seen: set[tuple[str, str, str]],
+    depth: int = 0,
+) -> None:
+    if depth > 10:
+        return
+    if isinstance(obj, list):
+        for item in obj:
+            _walk_jsonld_dates(item, observations, seen=seen, depth=depth + 1)
+        return
+    if not isinstance(obj, dict):
+        return
+    for key, kind in (
+        *((k, "published") for k in _JSONLD_PUBLISHED_KEYS),
+        *((k, "updated") for k in _JSONLD_UPDATED_KEYS),
+    ):
+        val = obj.get(key)
+        if isinstance(val, str) and val.strip():
+            raw = val.strip()
+            sig = ("html_json_ld", f"jsonld:{key}", raw)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            dt, err, status = parse_source_datetime(raw)
+            observations.append(
+                TemporalDateObservation(
+                    kind=kind,
+                    extraction_method="html_json_ld",
+                    source_field=f"jsonld:{key}",
+                    raw_value=raw,
+                    normalized_utc=dt.isoformat() if dt else None,
+                    status=status if dt else (err or "malformed"),
+                    reliability="structured_high" if dt else "unparsed",
+                    notes=err,
+                )
+            )
+    for value in obj.values():
+        if isinstance(value, (dict, list)):
+            _walk_jsonld_dates(value, observations, seen=seen, depth=depth + 1)
+
+
+def extract_html_temporal_metadata(html_or_soup: str | bytes | BeautifulSoup) -> dict[str, Any]:
+    """Extract observed publication/update dates and provenance from raw HTML.
+
+    Never parses policy prose for dates and never treats observed dates as legal
+    effective dates.
+    """
+    if isinstance(html_or_soup, BeautifulSoup):
+        soup = html_or_soup
+    else:
+        text = (
+            html_or_soup.decode("utf-8", errors="replace")
+            if isinstance(html_or_soup, bytes)
+            else html_or_soup
+        )
+        soup = BeautifulSoup(text, "html.parser")
+
+    observations: list[TemporalDateObservation] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    # 1. JSON-LD blocks
+    for tag in soup.find_all("script"):
+        if not isinstance(tag, Tag):
+            continue
+        stype = (tag.get("type") or "").strip().lower()
+        if stype != "application/ld+json":
+            continue
+        body = (tag.string or tag.get_text() or "").strip()
+        if not body or len(body) > 500_000:
+            continue
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+        _walk_jsonld_dates(payload, observations, seen=seen)
+
+    # 2. Standard HTML <meta> tags
+    for tag in soup.find_all("meta"):
+        if not isinstance(tag, Tag):
+            continue
+        content = tag.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        raw = content.strip()
+        key = (
+            tag.get("property") or tag.get("name") or tag.get("http-equiv") or ""
+        ).strip().lower()
+        if not key:
+            continue
+        kind: str | None = None
+        if key in _HTML_META_PUBLISHED_KEYS:
+            kind = "published"
+        elif key in _HTML_META_UPDATED_KEYS:
+            kind = "updated"
+        if kind is None:
+            continue
+        field_name = f"meta:{key}"
+        sig = ("html_meta", field_name, raw)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        dt, err, status = parse_source_datetime(raw)
+        observations.append(
+            TemporalDateObservation(
+                kind=kind,
+                extraction_method="html_meta",
+                source_field=field_name,
+                raw_value=raw,
+                normalized_utc=dt.isoformat() if dt else None,
+                status=status if dt else (err or "malformed"),
+                reliability="meta_medium" if dt else "unparsed",
+                notes=err,
+            )
+        )
+
+    # 3. <time datetime="..."> elements explicitly labeled as published/modified
+    for tag in soup.find_all("time"):
+        if not isinstance(tag, Tag):
+            continue
+        raw_dt = tag.get("datetime")
+        if not isinstance(raw_dt, str) or not raw_dt.strip():
+            continue
+        raw = raw_dt.strip()
+        itemprop = str(tag.get("itemprop") or "").strip().lower()
+        prop = str(tag.get("property") or "").strip().lower()
+        cls_blob = " ".join(str(c).lower() for c in (tag.get("class") or []))
+        marker = f"{itemprop} {prop} {cls_blob}"
+        kind = None
+        if any(k in marker for k in ("datepublished", "published", "pubdate")):
+            kind = "published"
+        elif any(k in marker for k in ("datemodified", "updated", "modified")):
+            kind = "updated"
+        if kind is None:
+            continue
+        field_name = f"time:{itemprop or prop or 'class'}"
+        sig = ("html_time_element", field_name, raw)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        dt, err, status = parse_source_datetime(raw)
+        observations.append(
+            TemporalDateObservation(
+                kind=kind,
+                extraction_method="html_time_element",
+                source_field=field_name,
+                raw_value=raw,
+                normalized_utc=dt.isoformat() if dt else None,
+                status=status if dt else (err or "malformed"),
+                reliability="meta_medium" if dt else "unparsed",
+                notes=err,
+            )
+        )
+
+    # 4. Explicit government date banners (MOM, GOV.UK, labeled page metadata)
+    for tag in soup.find_all(["span", "div", "p", "dl", "section"]):
+        if not isinstance(tag, Tag):
+            continue
+        blob = _attr_blob(tag)
+        if not blob or not any(tok in blob for tok in _BANNER_DATE_CLASSES_IDS):
+            continue
+        txt = normalize_text(tag.get_text(" ", strip=True))
+        if not txt or len(txt) > 220:
+            continue
+        for seg in re.split(r"[|;\n]+", txt):
+            seg = seg.strip()
+            m = _BANNER_LINE_RE.search(seg)
+            if not m:
+                continue
+            label = m.group(1).lower()
+            raw = m.group(2).strip(" .")
+            kind = "published" if "published" in label else "updated"
+            field_name = f"banner:{label}"
+            sig = ("html_gov_banner", field_name, raw)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            dt, err, status = parse_source_datetime(raw)
+            observations.append(
+                TemporalDateObservation(
+                    kind=kind,
+                    extraction_method="html_gov_banner",
+                    source_field=field_name,
+                    raw_value=raw,
+                    normalized_utc=dt.isoformat() if dt else None,
+                    status=status if dt else (err or "malformed"),
+                    reliability="banner_medium" if dt else "unparsed",
+                    notes=err,
+                )
+            )
+
+    if not observations:
+        return {}
+    return resolve_temporal_observations(observations).to_storage_dict()
+
+
+def extract_html_language(soup: BeautifulSoup) -> str | None:
+    """Extract declared page language from <html lang>, meta content-language, or og:locale."""
+    from lifepilot.agent.provenance import normalize_language_tag
+
+    html_tag = soup.find("html")
+    if isinstance(html_tag, Tag):
+        raw_lang = html_tag.get("lang") or html_tag.get("xml:lang")
+        if isinstance(raw_lang, str):
+            norm = normalize_language_tag(raw_lang)
+            if norm:
+                return norm
+    for meta in soup.find_all("meta"):
+        if not isinstance(meta, Tag):
+            continue
+        heq = str(meta.get("http-equiv") or "").strip().lower()
+        name = str(meta.get("name") or "").strip().lower()
+        prop = str(meta.get("property") or "").strip().lower()
+        if heq == "content-language" or name in {"language", "dc.language", "dcterms.language"} or prop == "og:locale":
+            raw = meta.get("content")
+            if isinstance(raw, str):
+                first = raw.split(",")[0].strip()
+                norm = normalize_language_tag(first)
+                if norm:
+                    return norm
+    return None
+
+
+def extract_html_language_from_html(html: str | bytes) -> str | None:
+    """Parse raw HTML text/bytes and return normalized declared language or None."""
+    text = html.decode("utf-8", errors="replace") if isinstance(html, bytes) else (html or "")
+    if not text.strip():
+        return None
+    soup = BeautifulSoup(text, "html.parser")
+    return extract_html_language(soup)
+
+
 def extract_html_document(html: str | bytes) -> StructuredDocument:
     """Parse HTML bytes/text into a structured title + ordered blocks."""
     if isinstance(html, bytes):
         text = html.decode("utf-8", errors="replace")
     else:
         text = html
-    # Keep an unstripped copy for embedded JSON recovery (hidden inputs may be
-    # nested under tags that noise-stripping would otherwise remove).
+    # Keep an unstripped copy for embedded JSON recovery and temporal metadata
+    # (meta/banners may sit inside blocks stripped by noise removal).
     soup_raw = BeautifulSoup(text, "html.parser")
+    temporal_metadata = extract_html_temporal_metadata(soup_raw)
+    language = extract_html_language(soup_raw)
     soup = BeautifulSoup(text, "html.parser")
     _strip_noise(soup)
     main = _pick_main_root(soup)
@@ -631,7 +921,12 @@ def extract_html_document(html: str | bytes) -> StructuredDocument:
                 title = embedded_title
 
     blocks = _dedupe_content_blocks(blocks)
-    return StructuredDocument(title=title, blocks=blocks)
+    return StructuredDocument(
+        title=title,
+        blocks=blocks,
+        temporal_metadata=temporal_metadata,
+        language=language,
+    )
 
 
 def content_blocks_as_dicts(document: StructuredDocument) -> list[dict[str, Any]]:
@@ -696,6 +991,7 @@ def structured_document_from_dict(data: dict[str, Any]) -> StructuredDocument:
         page_count=data.get("page_count"),
         empty_pages=empty,
         metadata=dict(data.get("metadata") or {}),
+        temporal_metadata=dict(data.get("temporal_metadata") or {}),
     )
 
 
@@ -707,6 +1003,7 @@ __all__ = [
     "StructuredDocument",
     "content_blocks_as_dicts",
     "extract_html_document",
+    "extract_html_temporal_metadata",
     "normalize_text",
     "normalized_content_sha256",
     "structured_document_from_dict",

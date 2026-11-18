@@ -40,6 +40,7 @@ class _Unit:
     text: str
     heading_path: str
     is_heading: bool = False
+    table_header: str | None = None
 
 
 def _estimate_tokens(text: str) -> int:
@@ -90,21 +91,85 @@ def blocks_to_units(blocks: list[dict[str, Any]], *, title: str | None) -> list[
             units.append(_Unit(text=text, heading_path=path, is_heading=True))
             continue
         path = _path_from_stack(stack) or (normalize_text(title) if title else "")
-        units.append(_Unit(text=text, heading_path=path, is_heading=False))
+        table_header: str | None = None
+        if typ == "table":
+            hdr_parts: list[str] = []
+            cap = normalize_text(str(block.get("caption") or ""))
+            if cap:
+                hdr_parts.append(cap)
+            hdrs = block.get("headers") or []
+            if hdrs:
+                hdr_text = " | ".join(normalize_text(str(h)) for h in hdrs if normalize_text(str(h)))
+                if hdr_text:
+                    hdr_parts.append(hdr_text)
+            if hdr_parts:
+                table_header = "\n".join(hdr_parts)
+        units.append(
+            _Unit(
+                text=text,
+                heading_path=path,
+                is_heading=False,
+                table_header=table_header,
+            )
+        )
     return units
 
 
-def _split_long_text(text: str, *, max_chars: int, overlap_chars: int) -> list[str]:
-    """Split oversized unit text on paragraph/sentence boundaries."""
+def _safe_slice_end(text: str, max_chars: int) -> int:
+    """Prefer whitespace cut before max_chars so words/numbers are not sheared."""
+    if len(text) <= max_chars:
+        return len(text)
+    cut = text[:max_chars]
+    ws = max(cut.rfind("\n"), cut.rfind(" "))
+    if ws >= max_chars // 2:
+        return ws
+    return max_chars
+
+
+def _safe_tail(buf: str, overlap_chars: int) -> str:
+    if not overlap_chars or len(buf) <= overlap_chars:
+        return ""
+    raw = buf[-overlap_chars:]
+    first_space = raw.find(" ")
+    if 0 < first_space < len(raw) - 10:
+        return raw[first_space + 1 :].lstrip()
+    return raw.lstrip()
+
+
+def _split_long_text(
+    text: str,
+    *,
+    max_chars: int,
+    overlap_chars: int,
+    header_prefix: str | None = None,
+) -> list[str]:
+    """Split oversized unit text on paragraph/sentence/whitespace boundaries."""
     text = text.strip()
     if len(text) <= max_chars:
         return [text]
-    # Prefer blank-line / newline splits, then sentences.
+    prefix = (header_prefix or "").strip()
+    use_prefix = bool(prefix and len(prefix) + 40 < max_chars)
     parts = re.split(r"\n+", text)
     if len(parts) == 1:
         parts = re.split(r"(?<=[.!?])\s+", text)
     out: list[str] = []
     buf = ""
+
+    def _hard_wrap(chunk_str: str) -> str:
+        while len(chunk_str) > max_chars:
+            cut_idx = _safe_slice_end(chunk_str, max_chars)
+            out.append(chunk_str[:cut_idx].rstrip())
+            step_start = max(1, cut_idx - min(overlap_chars, cut_idx // 2))
+            if step_start < cut_idx:
+                sp = chunk_str.find(" ", step_start, cut_idx)
+                if sp != -1:
+                    step_start = sp + 1
+            remainder = chunk_str[step_start:].lstrip()
+            if use_prefix and not remainder.startswith(prefix):
+                remainder = f"{prefix}\n{remainder}".strip()
+            chunk_str = remainder
+        return chunk_str
+
     for part in parts:
         part = part.strip()
         if not part:
@@ -115,21 +180,15 @@ def _split_long_text(text: str, *, max_chars: int, overlap_chars: int) -> list[s
             continue
         if buf:
             out.append(buf)
-            # Limited overlap from end of previous buffer.
-            tail = buf[-overlap_chars:] if overlap_chars and len(buf) > overlap_chars else ""
-            buf = f"{tail}\n{part}".strip() if tail else part
+            if use_prefix and not part.startswith(prefix):
+                buf = f"{prefix}\n{part}".strip()
+            else:
+                tail = _safe_tail(buf, overlap_chars)
+                buf = f"{tail}\n{part}".strip() if tail else part
             if len(buf) > max_chars:
-                # Hard wrap remaining long atom.
-                while len(buf) > max_chars:
-                    out.append(buf[:max_chars].rstrip())
-                    start = max(0, max_chars - overlap_chars)
-                    buf = buf[start:].lstrip()
+                buf = _hard_wrap(buf)
         else:
-            while len(part) > max_chars:
-                out.append(part[:max_chars].rstrip())
-                start = max(0, max_chars - overlap_chars)
-                part = part[start:].lstrip()
-            buf = part
+            buf = _hard_wrap(part)
     if buf:
         out.append(buf)
     return out
@@ -197,7 +256,10 @@ def chunk_units(
 
     for unit in units:
         pieces = _split_long_text(
-            unit.text, max_chars=max_chars, overlap_chars=overlap_chars
+            unit.text,
+            max_chars=max_chars,
+            overlap_chars=overlap_chars,
+            header_prefix=unit.table_header,
         )
         for piece in pieces:
             # Start a new chunk at a heading when the buffer is already healthy.
@@ -220,9 +282,8 @@ def chunk_units(
                 buf_start = cursor
                 buf_path = unit.heading_path
             buf_parts.append(piece)
-            # If a single piece filled near max, flush.
-            if _estimate_tokens("\n\n".join(buf_parts)) >= target_chars and not unit.is_heading:
-                # Keep going until next heading-ish break unless over max.
+            # If buffer filled to target tokens, allow flush at max_tokens.
+            if _estimate_tokens("\n\n".join(buf_parts)) >= target_tokens and not unit.is_heading:
                 if _estimate_tokens("\n\n".join(buf_parts)) >= max_tokens:
                     flush()
                     buf_start = cursor + len(piece) + 2
@@ -289,6 +350,21 @@ def chunk_units(
     )
 
 
+def _detect_table_header_prefix(text: str) -> str | None:
+    """Detect a table column header line near the top of a chunk for continuation splits."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    for idx, ln in enumerate(lines[:5]):
+        if " | " in ln and len(ln) <= 180:
+            # Prefer the first ' | ' row (which in block_plain_text is always the headers row).
+            if idx > 0 and " | " not in lines[idx - 1] and len(lines[idx - 1]) <= 120:
+                # Include immediate caption if short and non-sentence, else just header line.
+                cap = lines[idx - 1]
+                if not cap.endswith((".", "!", "?")) and idx == 1:
+                    return f"{cap}\n{ln}"
+            return ln
+    return None
+
+
 def _enforce_max_chars(
     drafts: list[ChunkDraft],
     *,
@@ -301,8 +377,12 @@ def _enforce_max_chars(
         if len(draft.content_text) <= max_chars:
             out.append(draft)
             continue
+        hdr = _detect_table_header_prefix(draft.content_text)
         pieces = _split_long_text(
-            draft.content_text, max_chars=max_chars, overlap_chars=overlap_chars
+            draft.content_text,
+            max_chars=max_chars,
+            overlap_chars=overlap_chars,
+            header_prefix=hdr,
         )
         offset = draft.char_start or 0
         for piece in pieces:

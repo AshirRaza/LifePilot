@@ -36,6 +36,7 @@ class ChunkRunStats:
     eligible_versions: int = 0
     processed: int = 0
     skipped_unchanged: int = 0
+    skipped_duplicate_historical: int = 0
     skipped_no_extraction: int = 0
     skipped_missing_file: int = 0
     skipped_empty_chunks: int = 0
@@ -60,6 +61,7 @@ class ChunkRunStats:
             "eligible_versions": self.eligible_versions,
             "processed": self.processed,
             "skipped_unchanged": self.skipped_unchanged,
+            "skipped_duplicate_historical": self.skipped_duplicate_historical,
             "skipped_no_extraction": self.skipped_no_extraction,
             "skipped_missing_file": self.skipped_missing_file,
             "skipped_empty_chunks": self.skipped_empty_chunks,
@@ -118,26 +120,36 @@ def iter_eligible_versions(
     session: Session,
     *,
     document_ids: list[int] | None = None,
+    version_ids: list[int] | None = None,
     jurisdiction_codes: list[str] | None = None,
     limit: int | None = None,
+    include_historical: bool = False,
 ) -> list[DocumentVersion]:
-    """Current versions ordered by id (caller filters extraction presence)."""
+    """Eligible versions ordered by id (current only unless ``include_historical=True``)."""
     stmt = (
         select(DocumentVersion)
         .join(Document, Document.id == DocumentVersion.document_id)
         .join(Source, Source.id == Document.primary_source_id)
         .join(Jurisdiction, Jurisdiction.id == Source.jurisdiction_id)
-        .where(DocumentVersion.is_current.is_(True))
         .options(
             joinedload(DocumentVersion.document)
             .joinedload(Document.primary_source)
             .joinedload(Source.jurisdiction),
             joinedload(DocumentVersion.extractions),
         )
-        .order_by(DocumentVersion.id)
+        .order_by(
+            DocumentVersion.document_id,
+            DocumentVersion.is_current.desc(),
+            DocumentVersion.version_number.asc(),
+            DocumentVersion.id,
+        )
     )
+    if not include_historical:
+        stmt = stmt.where(DocumentVersion.is_current.is_(True))
     if document_ids:
         stmt = stmt.where(DocumentVersion.document_id.in_(document_ids))
+    if version_ids:
+        stmt = stmt.where(DocumentVersion.id.in_(version_ids))
     if jurisdiction_codes:
         codes = [c.upper() for c in jurisdiction_codes]
         stmt = stmt.where(Jurisdiction.code.in_(codes))
@@ -146,18 +158,114 @@ def iter_eligible_versions(
     return list(session.scalars(stmt).unique().all())
 
 
+def _has_equivalent_chunked_version(
+    session: Session,
+    *,
+    document_id: int,
+    version_id: int,
+    extraction_sha256: str | None,
+    raw_sha256: str,
+) -> bool:
+    """True when another historical chunked version of the same doc has identical content."""
+    other_versions = session.execute(
+        select(
+            DocumentVersion.id,
+            DocumentVersion.content_sha256,
+        )
+        .where(
+            DocumentVersion.document_id == document_id,
+            DocumentVersion.id != version_id,
+            DocumentVersion.is_current.is_(False),
+            DocumentVersion.id.in_(
+                select(DocumentChunk.document_version_id).distinct()
+            ),
+        )
+    ).all()
+    if not other_versions:
+        return False
+
+    other_ids = [int(r[0]) for r in other_versions]
+    if extraction_sha256:
+        ext_match = session.scalar(
+            select(DocumentExtraction.id)
+            .where(
+                DocumentExtraction.document_version_id.in_(other_ids),
+                DocumentExtraction.status == "success",
+                DocumentExtraction.content_sha256 == extraction_sha256,
+            )
+            .limit(1)
+        )
+        if ext_match is not None:
+            return True
+
+    return any(str(r[1]) == raw_sha256 for r in other_versions)
+
+
+def sync_chunk_currency_flags(
+    session: Session,
+    *,
+    document_id: int,
+) -> int:
+    """Keep ``document_chunks.is_current_version`` aligned with ``document_versions.is_current``."""
+    from sqlalchemy import update
+
+    current_ids = list(
+        session.scalars(
+            select(DocumentVersion.id).where(
+                DocumentVersion.document_id == document_id,
+                DocumentVersion.is_current.is_(True),
+            )
+        ).all()
+    )
+    updated = 0
+    if current_ids:
+        res1 = session.execute(
+            update(DocumentChunk)
+            .where(
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.document_version_id.in_(current_ids),
+                DocumentChunk.is_current_version.is_(False),
+            )
+            .values(is_current_version=True)
+        )
+        updated += int(res1.rowcount or 0)
+        res2 = session.execute(
+            update(DocumentChunk)
+            .where(
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.document_version_id.not_in(current_ids),
+                DocumentChunk.is_current_version.is_(True),
+            )
+            .values(is_current_version=False)
+        )
+        updated += int(res2.rowcount or 0)
+    else:
+        res = session.execute(
+            update(DocumentChunk)
+            .where(
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.is_current_version.is_(True),
+            )
+            .values(is_current_version=False)
+        )
+        updated += int(res.rowcount or 0)
+    return updated
+
+
 def chunk_one_version(
     session: Session,
     version: DocumentVersion,
     *,
     data_dir: Path,
     force: bool = False,
+    allow_non_current: bool = False,
+    dedupe_historical: bool = True,
 ) -> tuple[str, int, int]:
-    """Chunk one current version.
+    """Chunk one version (current-only unless ``allow_non_current=True``).
 
     Returns ``(status, chunks_written, chunks_deleted)``.
     """
-    if not version.is_current:
+    if not version.is_current and not allow_non_current:
         return "skipped_not_current", 0, 0
 
     document = version.document
@@ -170,6 +278,21 @@ def chunk_one_version(
     if extraction is None:
         return "skipped_no_extraction", 0, 0
 
+    if (
+        not version.is_current
+        and allow_non_current
+        and dedupe_historical
+        and not force
+        and _has_equivalent_chunked_version(
+            session,
+            document_id=document.id,
+            version_id=version.id,
+            extraction_sha256=extraction.content_sha256,
+            raw_sha256=version.content_sha256,
+        )
+    ):
+        return "skipped_duplicate_historical", 0, 0
+
     try:
         payload = _load_payload(data_dir, extraction.storage_path or "")
     except FileNotFoundError:
@@ -181,6 +304,7 @@ def chunk_one_version(
 
     fp = _fingerprint(drafts)
     if not force and _existing_fingerprint(session, version.id) == fp:
+        sync_chunk_currency_flags(session, document_id=document.id)
         return "skipped_unchanged", 0, 0
 
     deleted = session.execute(
@@ -188,6 +312,7 @@ def chunk_one_version(
     )
     deleted_n = int(deleted.rowcount or 0)
 
+    is_curr = bool(version.is_current)
     for draft in drafts:
         session.add(
             DocumentChunk(
@@ -204,10 +329,11 @@ def chunk_one_version(
                 chunk_index=draft.chunk_index,
                 content_text=draft.content_text,
                 content_sha256=draft.content_sha256,
-                is_current_version=True,
+                is_current_version=is_curr,
             )
         )
     session.flush()
+    sync_chunk_currency_flags(session, document_id=document.id)
     return "processed", len(drafts), deleted_n
 
 
@@ -216,35 +342,45 @@ def run_chunking(
     *,
     data_dir: Path | str | None = None,
     document_ids: list[int] | None = None,
+    version_ids: list[int] | None = None,
     jurisdiction_codes: list[str] | None = None,
     limit: int | None = None,
     batch_size: int = 25,
     force: bool = False,
+    include_historical: bool = False,
+    dedupe_historical: bool = True,
     progress: Callable[[str], None] | None = None,
 ) -> ChunkRunStats:
-    """Chunk eligible current extractions into ``document_chunks``.
+    """Chunk eligible extractions into ``document_chunks``.
 
-    Commits every ``batch_size`` successful/skip operations so runs are
-    resumable after interruption. Per-document failures are recorded and
-    do not abort the batch.
+    Defaults to ``include_historical=False`` (current versions only). Passing
+    ``include_historical=True`` enables bounded, deduplicated indexing of
+    historical versions with ``is_current_version=False``.
     """
     root = data_root(data_dir)
     stats = ChunkRunStats()
     versions = iter_eligible_versions(
         session,
         document_ids=document_ids,
+        version_ids=version_ids,
         jurisdiction_codes=jurisdiction_codes,
         limit=limit,
+        include_historical=include_historical,
     )
     stats.eligible_versions = len(versions)
     if progress:
-        progress(f"Eligible current versions: {stats.eligible_versions}")
+        progress(f"Eligible versions: {stats.eligible_versions}")
 
     since_commit = 0
     for i, version in enumerate(versions, start=1):
         try:
             status, written, deleted_n = chunk_one_version(
-                session, version, data_dir=root, force=force
+                session,
+                version,
+                data_dir=root,
+                force=force,
+                allow_non_current=include_historical,
+                dedupe_historical=dedupe_historical,
             )
             if status == "processed":
                 stats.processed += 1
@@ -266,6 +402,8 @@ def run_chunking(
                 )
             elif status == "skipped_unchanged":
                 stats.skipped_unchanged += 1
+            elif status == "skipped_duplicate_historical":
+                stats.skipped_duplicate_historical += 1
             elif status == "skipped_no_extraction":
                 stats.skipped_no_extraction += 1
             elif status == "skipped_missing_file":

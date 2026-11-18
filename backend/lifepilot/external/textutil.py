@@ -10,20 +10,42 @@ class _HTMLStripper(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self._chunks: list[str] = []
-        self._skip = False
+        self._skip_depth = 0
+        self._in_row = False
+        self._row_has_cell = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in {"script", "style", "nav", "footer", "header"}:
-            self._skip = True
+        t = (tag or "").lower()
+        if t in {"script", "style", "nav", "footer", "header", "aside", "noscript", "template"}:
+            self._skip_depth += 1
+            return
+        if self._skip_depth > 0:
+            return
+        if t == "tr":
+            self._in_row = True
+            self._row_has_cell = False
+        elif t in {"th", "td"}:
+            if self._row_has_cell:
+                self._chunks.append(" | ")
+            self._row_has_cell = True
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in {"script", "style", "nav", "footer", "header"}:
-            self._skip = False
-        if tag in {"p", "li", "h1", "h2", "h3", "h4", "br", "div", "tr"}:
+        t = (tag or "").lower()
+        if t in {"script", "style", "nav", "footer", "header", "aside", "noscript", "template"}:
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth > 0:
+            return
+        if t == "tr":
+            self._in_row = False
+            self._row_has_cell = False
+            self._chunks.append("\n")
+        elif t in {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "br", "div", "table"}:
             self._chunks.append("\n")
 
     def handle_data(self, data: str) -> None:
-        if not self._skip and data:
+        if self._skip_depth == 0 and data:
             self._chunks.append(data)
 
     def get_text(self) -> str:
@@ -47,40 +69,66 @@ def normalize_whitespace(text: str) -> str:
     return text.strip()
 
 
-def extract_passages(text: str, *, max_passages: int = 8, max_chars: int = 600) -> list[str]:
-    """Split substantive text into short passages; drop tiny/nav crumbs."""
+def extract_passages_with_truncation(
+    text: str,
+    *,
+    max_passages: int = 8,
+    max_chars: int = 600,
+) -> tuple[list[str], bool]:
+    """Split substantive text into whitespace-bounded passages and report truncation."""
     if not text:
-        return []
-    parts = re.split(r"\n{2,}|(?<=[.!?])\s+(?=[A-Z])", text)
+        return [], False
+    parts = re.split(r"\n{2,}|(?<=[.!?])\s+(?=[A-Z0-9£€$\(])", text)
     out: list[str] = []
-    for part in parts:
+    truncated = False
+    for idx, part in enumerate(parts):
         cleaned = normalize_whitespace(part)
         if len(cleaned) < 40:
             continue
-        # Skip menu-like crumbs
         if cleaned.count("\n") > 12 and len(cleaned) < 200:
             continue
         if len(cleaned) > max_chars:
-            cleaned = cleaned[: max_chars - 1].rstrip() + "…"
+            truncated = True
+            cut = cleaned[: max_chars - 15].rsplit(" ", 1)[0].rstrip()
+            if not cut or len(cut) < max_chars // 2:
+                cut = cleaned[: max_chars - 15].rstrip()
+            cleaned = f"{cut} …[truncated]"
         out.append(cleaned)
         if len(out) >= max_passages:
+            if sum(len(normalize_whitespace(p)) for p in parts[idx + 1 :]) >= 20:
+                truncated = True
             break
     if not out and text.strip():
-        snippet = normalize_whitespace(text)[:max_chars]
+        norm = normalize_whitespace(text)
+        if len(norm) > max_chars:
+            truncated = True
+            cut = norm[: max_chars - 15].rsplit(" ", 1)[0].rstrip()
+            snippet = f"{cut or norm[: max_chars - 15].rstrip()} …[truncated]"
+        else:
+            snippet = norm
         if snippet:
             out.append(snippet)
-    return out
+    return out, truncated
+
+
+def extract_passages(text: str, *, max_passages: int = 8, max_chars: int = 600) -> list[str]:
+    """Split substantive text into short passages; drop tiny/nav crumbs."""
+    passages, _ = extract_passages_with_truncation(
+        text, max_passages=max_passages, max_chars=max_chars
+    )
+    return passages
 
 
 def dig_body_html(details: dict) -> str | None:
-    """Pull HTML body fields from GOV.UK Content API ``details``."""
+    """Pull all substantive HTML body fields from GOV.UK Content API ``details``."""
     if not isinstance(details, dict):
         return None
-    for key in ("body", "introduction", "need_to_know", "other_ways_to_apply"):
+    collected: list[str] = []
+    for key in ("introduction", "body", "need_to_know", "other_ways_to_apply"):
         val = details.get(key)
         if isinstance(val, str) and val.strip():
-            return val
-        if isinstance(val, list):
+            collected.append(val)
+        elif isinstance(val, list):
             chunks: list[str] = []
             for item in val:
                 if isinstance(item, dict) and isinstance(item.get("content"), str):
@@ -88,17 +136,16 @@ def dig_body_html(details: dict) -> str | None:
                 elif isinstance(item, str):
                     chunks.append(item)
             if chunks:
-                return "\n".join(chunks)
-    # Nested parts used by some schemas
+                collected.append("\n".join(chunks))
+    # Nested parts used by multi-part GOV.UK guides
     parts = details.get("parts")
     if isinstance(parts, list):
-        chunks = []
         for part in parts:
             if isinstance(part, dict):
                 body = part.get("body")
-                if isinstance(body, str):
+                if isinstance(body, str) and body.strip():
                     title = part.get("title") or ""
-                    chunks.append(f"{title}\n{body}" if title else body)
-        if chunks:
-            return "\n\n".join(chunks)
+                    collected.append(f"<h2>{title}</h2>\n{body}" if title else body)
+    if collected:
+        return "\n\n".join(collected)
     return None

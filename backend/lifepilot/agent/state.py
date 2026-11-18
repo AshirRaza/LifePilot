@@ -31,6 +31,14 @@ class AgentGraphState(TypedDict):
     retrieval_top_k: int
     include_external: bool | None
     external_mode: str
+    as_of_date: NotRequired[str | None]
+    resolved_reference_date: NotRequired[str | None]
+    temporal_mode: NotRequired[str]
+    temporal_outcome: NotRequired[str | None]
+    temporal_period_year: NotRequired[int | None]
+    period_start: NotRequired[str | None]
+    period_end: NotRequired[str | None]
+    clarification_needed: NotRequired[bool]
 
     # Execution control.
     step_count: int
@@ -79,6 +87,7 @@ def initial_state_from_request(
     include_external: bool | None,
     max_workflow_steps: int,
     external_mode: str = "auto",
+    as_of_date: str | None = None,
 ) -> AgentGraphState:
     """Build an isolated per-request state dict (no shared globals)."""
     return AgentGraphState(
@@ -92,6 +101,10 @@ def initial_state_from_request(
         retrieval_top_k=retrieval_top_k,
         include_external=include_external,
         external_mode=external_mode,
+        as_of_date=as_of_date,
+        resolved_reference_date=None,
+        temporal_mode="current",
+        temporal_outcome=None,
         step_count=0,
         max_workflow_steps=max_workflow_steps,
         status="success",
