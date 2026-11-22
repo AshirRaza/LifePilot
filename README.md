@@ -1,24 +1,30 @@
 # LifePilot
 
-Evidence-backed immigration information backend (UK relocation MVP first).
+LifePilot is an AI-assisted personal administration platform for complex life transitions—starting with international relocation and UK immigration admin.
 
-Official government sources are ingested into a curated knowledge base. The agent retrieves with hybrid RAG (`external_mode=auto`), drafts grounded Claude answers when configured, then runs unified legal verification. This is **not legal advice**. External hits remain `unverified_external` and are never auto-promoted into the KB.
+It is built as an **evidence-backed immigration intelligence backend**: answers are grounded in curated official sources, checked by deterministic verification, and kept separate from human legal approval. It is **not legal advice**.
 
-**Stack:** Python 3.12 · PostgreSQL + pgvector · FastAPI · LangGraph · local E5 embeddings · pytest
+## Why it exists
+
+International movers face fragmented government guidance, documents, deadlines, and task dependencies. Generic chatbots invent requirements or treat model confidence as authority. LifePilot keeps persistent structure, cites official material, and fails closed when evidence is missing or outdated.
+
+**MVP focus:** international graduates moving into UK employment (profile → roadmap → document-aware workflows → change-aware updates).
+
+## What it does
+
+- Ingests allowlisted official sources into PostgreSQL + pgvector
+- Retrieves with hybrid RAG and optional external official connectors
+- Drafts grounded answers (Claude when configured), then runs claim-level legal verification
+- Distinguishes **mechanical support** from **human-verified** legal rules
+- Tracks source changes and routes high-risk items through human review governance
 
 ```text
-validate → evidence → generate → verify → respond
+validate → retrieve evidence → generate → verify → respond
 ```
 
-## Release status
+## Stack
 
-| Gate | Status |
-| --- | --- |
-| Frontend integration | **Ready** |
-| Private staging deployment | **Ready with limitations** |
-| Public production launch | **Not approved** |
-
-See [`docs/README.md`](docs/README.md) for blockers.
+Python 3.12 · FastAPI · LangGraph · PostgreSQL + pgvector · local E5 embeddings · Alembic · pytest
 
 ## Setup
 
@@ -34,50 +40,51 @@ alembic upgrade head
 python scripts/database/import_seed_sources.py
 ```
 
-Configuration: [`.env.example`](.env.example).
+See [`.env.example`](.env.example) for configuration.
 
-## Core commands
+## Common commands
 
 ```powershell
 $env:PYTHONPATH = "backend"
 
 python scripts/operations/ask_lifepilot.py --question "UK Skilled Worker requirements?" --jurisdiction GB
-python scripts/operations/run_agent_evidence.py --question "…" --jurisdiction GB
-python scripts/maintenance/run_knowledge_maintenance.py --dry-run --limit 10
 python scripts/operations/run_api.py --host 127.0.0.1 --port 8000
+python scripts/maintenance/run_knowledge_maintenance.py --dry-run --limit 10
 pytest -q
 ```
 
-## Private API
-
-Endpoints: `POST /v1/answer`, `GET /health`, `GET /ready`, `GET /v1/ops/status` (auth).
-
-```powershell
-$env:LIFEPILOT_ENV = "production"
-$env:LIFEPILOT_API_REQUIRE_AUTH = "1"
-$env:LIFEPILOT_API_KEYS = "replace_with_long_random_api_key"
-python scripts/operations/run_api.py --host 127.0.0.1 --port 8000
-
-# Or Compose API profile
-docker compose --profile api up -d --build
-```
-
-`/v1/answer` always uses `external_mode=auto` and unified verification.
+Private API: `POST /v1/answer`, `GET /health`, `GET /ready`. Auth via `LIFEPILOT_API_KEYS` when required.
 
 ## Package map
 
 | Package | Role |
 | --- | --- |
 | `lifepilot.api` | FastAPI boundary |
-| `lifepilot.agent` | LangGraph agent, grounding, verification |
+| `lifepilot.agent` | Orchestration, grounding, verification |
 | `lifepilot.rag` | Chunking, embeddings, internal retrieval |
 | `lifepilot.external` | Official-source connectors |
+| `lifepilot.governance` | Human legal-review workflows & authority checks |
 | `lifepilot.maintenance` | Freshness recheck / change queue |
-| `lifepilot.operations` | Locks, redaction, readiness |
-| `lifepilot.evaluation` | Shared eval helpers (not production answers) |
-| `lifepilot.db` | SQLAlchemy models/sessions |
+| `lifepilot.db` | Models and sessions |
 
-## Documentation
+## Release status
+
+| Gate | Status |
+| --- | --- |
+| Frontend integration | Ready |
+| Private staging | Ready with limitations |
+| Public production | **Not approved** |
+
+Details and blockers: [`docs/README.md`](docs/README.md).
+
+## Safety
+
+- Only allowlisted HTTPS approved sources are fetchable.
+- Automated verification is not human legal certification.
+- Confirm current rules on official government sites.
+- Do not commit `.env`, API keys, or database dumps.
+
+## Docs
 
 | Topic | Link |
 | --- | --- |
@@ -85,12 +92,3 @@ docker compose --profile api up -d --build
 | Architecture | [`docs/architecture.md`](docs/architecture.md) |
 | Scripts | [`scripts/README.md`](scripts/README.md) |
 | Production ops | [`docs/ops/production.md`](docs/ops/production.md) |
-| Backup & restore | [`docs/ops/backup_restore.md`](docs/ops/backup_restore.md) |
-
-## Safety
-
-- Only allowlisted HTTPS `approved` sources are fetchable.
-- Automated checks ≠ human legal verification.
-- Confirm current rules on official government sites.
-- Do not commit API keys, `.env` secrets, or database dumps.
-- Known dependency debt: `transformers` CVEs — tracked, not resolved by restructuring.
