@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import Session
 
-from lifepilot.db.models import LegalRule
+from lifepilot.db.models import LegalReviewItem, LegalRule
 
 _ACTIVE_DATE_STATUSES = frozenset(
     {
@@ -43,6 +43,35 @@ class LegalRuleLookupResult:
     multiple_periods_in_window: bool = False
     conflicting_rule_keys: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+def legal_rule_authority_block_reason(
+    session: Session,
+    rule: LegalRule,
+    *,
+    check_pending_material: bool = True,
+) -> str | None:
+    """Return a block reason if a rule must not be treated as human-verified authority.
+
+    Phase 10D.4: delegates to the central approval invariant. Standalone
+    ``verification_status=human_verified`` flags are insufficient.
+    """
+    if rule.verification_status != "human_verified":
+        return None
+
+    from lifepilot.governance.approval_invariant import (
+        validate_legal_rule_human_authority,
+    )
+
+    result = validate_legal_rule_human_authority(
+        session,
+        rule,
+        check_pending_material=check_pending_material,
+        require_review_linkage=True,
+    )
+    if result.ok:
+        return None
+    return result.reasons[0] if result.reasons else "approval_invariant_failed"
 
 
 def legal_rules_table_available(session: Session) -> bool:
@@ -285,6 +314,14 @@ def query_reviewed_legal_rules(
         if not is_verified:
             if date_ok or date_reason in {"unknown_effective_dates", "partially_known_effective_dates"}:
                 out.unreviewed_excluded_count += 1
+            continue
+        block_reason = legal_rule_authority_block_reason(session, rule)
+        if block_reason:
+            out.unreviewed_excluded_count += 1
+            out.warnings.append(
+                f"stale_or_invalidated_human_verified_rule_excluded:"
+                f"{rule.rule_key}:{block_reason}"
+            )
             continue
         if not date_ok:
             if date_reason in {"unknown_effective_dates", "partially_known_effective_dates"}:

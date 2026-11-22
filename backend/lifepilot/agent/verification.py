@@ -26,6 +26,11 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field
 
 from lifepilot.agent.answer import AnswerClaim
+from lifepilot.agent.claim_provenance import (
+    ClaimEvidenceRef,
+    build_claim_evidence_refs,
+    same_underlying_document,
+)
 from lifepilot.agent.evidence import (
     EvidenceItem,
     EvidenceSourceType,
@@ -58,6 +63,14 @@ from lifepilot.agent.pathway_applicability import (
 from lifepilot.agent.provenance import (
     NON_NORMATIVE_AUTHORITY_CATEGORIES,
     SourceAuthorityCategory,
+)
+from lifepilot.agent.qualifiers import (
+    COHORT_SCOPE_PATTERNS,
+    CONDITIONAL_QUALIFIER_RE,
+    QualifierDecision,
+    assess_claim_qualifier_entailment,
+    claim_has_high_risk_legal_assertion,
+    extract_qualifier_profile,
 )
 from lifepilot.agent.retrieval_policy import (
     detect_high_risk_categories,
@@ -120,6 +133,21 @@ _POLAR_CONFLICTS: tuple[tuple[re.Pattern[str], re.Pattern[str]], ...] = (
     ),
 )
 
+# Reason-code prefixes that mean the claim must be dropped (not merely qualified).
+_QUALIFIER_DROP_REASON_PREFIXES: tuple[str, ...] = (
+    "polarity_conflict:",
+    "bound_direction_conflict:",
+    "temporal_direction_conflict:",
+    "geographic_scope_conflict:",
+    "negation_scope_condition_stripped",
+    "mandatory_condition_omitted_from_claim",
+    "unsupported_universal_claim",
+    "cohort_qualifier_omitted_from_claim",
+    "age_restriction_omitted_from_claim",
+    "unrecognized_evidence_conditions_block_universal_claim",
+    "cross_passage_",
+)
+
 
 class ClaimVerificationStatus(str, Enum):
     SUPPORTED = "supported"
@@ -150,6 +178,11 @@ class ClaimVerificationOutcome(BaseModel):
     independent_corroboration: IndependentCorroboration = (
         IndependentCorroboration.NOT_REQUIRED
     )
+    # Phase 10C.4 additive provenance (backward compatible defaults).
+    corroborating_evidence_id: str | None = None
+    evidence_refs: list[ClaimEvidenceRef] = Field(default_factory=list)
+    provenance_incomplete: bool = False
+    corroboration_rejection_reasons: list[str] = Field(default_factory=list)
 
 
 class VerificationReport(BaseModel):
@@ -220,6 +253,14 @@ def _is_high_risk_claim(claim: str, question_categories: list[str]) -> bool:
     return bool(detect_high_risk_categories(claim))
 
 
+@dataclass
+class CorroborationSearchResult:
+    """Result of independent corroboration search (Phase 10C.4 / Q-10)."""
+
+    item: EvidenceItem | None = None
+    rejection_reasons: list[str] = field(default_factory=list)
+
+
 def find_distinct_corroboration(
     *,
     claim: str,
@@ -227,21 +268,69 @@ def find_distinct_corroboration(
     all_evidence: list[EvidenceItem],
     pathway_id: str | None,
 ) -> EvidenceItem | None:
-    """Pick a different-URL passage that supports the same numeric + currency + unit."""
+    """Pick an independent corroborating passage, or None.
+
+    Backward-compatible wrapper around :func:`search_distinct_corroboration`.
+    """
+    return search_distinct_corroboration(
+        claim=claim,
+        cited=cited,
+        all_evidence=all_evidence,
+        pathway_id=pathway_id,
+    ).item
+
+
+def search_distinct_corroboration(
+    *,
+    claim: str,
+    cited: list[EvidenceItem],
+    all_evidence: list[EvidenceItem],
+    pathway_id: str | None,
+) -> CorroborationSearchResult:
+    """Find independent corroboration with qualifier and document-scope checks.
+
+    A candidate must share compatible pathway, jurisdiction, numeric value /
+    currency / unit, cohort and mandatory conditions (via qualifier entailment),
+    authority/legal status, and true source independence. Same underlying
+    document or mirrored copies do not count.
+    """
     literals = numeric_literals_in_text(claim)
     if not literals:
-        return None
+        return CorroborationSearchResult(
+            rejection_reasons=["corroboration_skipped_no_material_numeric"]
+        )
+
     cited_urls = {_url_key(c.source_url) for c in cited}
+    cited_ids = {c.evidence_id for c in cited}
     requested = (pathway_id or "").strip() or None
+    claim_profile = extract_qualifier_profile(claim)
+    claim_jurs = {(c.jurisdiction or "").upper() for c in cited if c.jurisdiction}
+    rejections: list[str] = []
+
     for item in all_evidence:
         key = _url_key(item.source_url)
-        if not key or key in cited_urls:
+        if item.evidence_id in cited_ids:
             continue
-        if item.evidence_id in {c.evidence_id for c in cited}:
+        if not key:
+            rejections.append(f"corroboration_rejected:{item.evidence_id}:missing_url")
+            continue
+        if key in cited_urls:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:same_url_key"
+            )
+            continue
+        if any(same_underlying_document(item, c) for c in cited):
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:same_underlying_document"
+            )
             continue
         if getattr(item, "source_authority_category", "unknown") in NON_NORMATIVE_AUTHORITY_CATEGORIES:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:inadequate_authority"
+            )
             continue
-        if (item.legal_status or "").strip().lower() in {
+        legal_status = (item.legal_status or "").strip().lower()
+        if legal_status in {
             "proposed",
             "proposed_not_effective",
             "proposed_or_preparatory",
@@ -249,17 +338,115 @@ def find_distinct_corroboration(
             "dataset_catalog",
             "portal_html_only",
         }:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:non_enacted_or_portal_status"
+            )
             continue
-        if requested and not requested.startswith("eu_") and bool((item.provenance or {}).get("eu_level_source")):
+        # Affirmative independent confirmation requires a clear enacted-like status.
+        # Unclear/unknown status may remain as context but must not raise confidence.
+        if legal_status in {"", "unknown"}:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:unclear_legal_status"
+            )
             continue
-        if not diagnose_claim_numeric_support(claim, [item]).supported:
+        if getattr(item, "is_truncated", False) or "…[truncated]" in (
+            item.passage_text or ""
+        ):
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:truncated_evidence"
+            )
+            continue
+        if requested and not requested.startswith("eu_") and bool(
+            (item.provenance or {}).get("eu_level_source")
+        ):
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:eu_level_for_national_pathway"
+            )
+            continue
+        if claim_jurs and (item.jurisdiction or "").upper() not in claim_jurs:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:jurisdiction_mismatch"
+            )
+            continue
+
+        num_diag = diagnose_claim_numeric_support(claim, [item])
+        if not num_diag.supported:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:numeric_incompatible:"
+                f"{num_diag.reason}"
+            )
             continue
         if requested and requested not in evidence_pathway_signals(item):
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:pathway_incompatible"
+            )
             continue
         if not claim_passage_overlap_ok(claim, [item.passage_text or ""]):
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:insufficient_overlap"
+            )
             continue
-        return item
-    return None
+
+        # Q-10 / 10C.5: only a clean qualifier PASS may raise corroboration confidence.
+        # contradicted / insufficient / uncertain must not grant independent confirmation.
+        q_assess = assess_claim_qualifier_entailment(claim, [item])
+        if q_assess.decision == QualifierDecision.CONTRADICTED:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:qualifier_conflict:"
+                + ",".join((q_assess.reasons or ["conflict"])[:2])
+            )
+            continue
+        if q_assess.decision == QualifierDecision.INSUFFICIENT:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:qualifier_insufficient:"
+                + ",".join((q_assess.reasons or ["insufficient"])[:2])
+            )
+            continue
+        if q_assess.decision == QualifierDecision.UNCERTAIN:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:qualifier_uncertain:"
+                + ",".join((q_assess.reasons or ["uncertain"])[:2])
+            )
+            continue
+        if q_assess.decision != QualifierDecision.PASS:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:qualifier_not_pass"
+            )
+            continue
+
+        item_profile = extract_qualifier_profile(item.passage_text or "")
+        # Same amount but different/missing cohort must not corroborate a scoped claim.
+        if claim_profile.cohorts:
+            shared_cohorts = claim_profile.cohorts & item_profile.cohorts
+            if not shared_cohorts:
+                rejections.append(
+                    f"corroboration_rejected:{item.evidence_id}:cohort_mismatch"
+                )
+                continue
+        # Claim with dates cannot be corroborated by a passage that omits period scope.
+        if claim_profile.dates and not item_profile.dates:
+            rejections.append(
+                f"corroboration_rejected:{item.evidence_id}:missing_effective_period"
+            )
+            continue
+        # Same amount but different legal period.
+        if claim_profile.dates and item_profile.dates:
+            if claim_profile.dates.isdisjoint(item_profile.dates):
+                # Allow if roles differ but overlapping dates exist; otherwise reject.
+                claim_date_vals = {d for _, d in claim_profile.dates}
+                item_date_vals = {d for _, d in item_profile.dates}
+                if claim_date_vals.isdisjoint(item_date_vals):
+                    rejections.append(
+                        f"corroboration_rejected:{item.evidence_id}:temporal_period_mismatch"
+                    )
+                    continue
+
+        # Candidate accepted as affirmative independent corroboration.
+        return CorroborationSearchResult(item=item, rejection_reasons=rejections)
+
+    if not rejections:
+        rejections.append("corroboration_unavailable_no_candidate")
+    return CorroborationSearchResult(item=None, rejection_reasons=rejections)
 
 
 def _claim_polar_conflict(claim: str, passages: list[str]) -> str | None:
@@ -276,30 +463,9 @@ def _claim_polar_conflict(claim: str, passages: list[str]) -> str | None:
     return None
 
 
-_COHORT_SCOPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("transitional", re.compile(r"(?i)\b(transitional|continually\s+held|tier\s*2|legacy\s+cohort|pre-?2024)\b")),
-    ("extending_updating", re.compile(r"(?i)\b(extending|updating\s+(?:the\s+)?visa)\b")),
-    ("under_26", re.compile(r"(?i)\bunder\s+26\b")),
-    ("under_30", re.compile(r"(?i)\bunder\s+30\b")),
-    ("over_30", re.compile(r"(?i)\b(30\s+or\s+older|over\s+30)\b")),
-    ("new_entrant", re.compile(r"(?i)\b(new\s+entrant|recent\s+graduate|professional\s+training)\b")),
-    ("phd_stem", re.compile(r"(?i)\b(stem\s+phd|phd\s+in\s+(?:a\s+)?stem)\b")),
-    ("phd_non_stem", re.compile(r"(?i)\b(non-?stem|relevant\s+phd)\b")),
-    ("postdoc", re.compile(r"(?i)\bpostdoctoral\b")),
-    ("healthcare_education", re.compile(r"(?i)\b(healthcare|national\s+pay\s+scale|teaching|prison\s+officer)\b")),
-    ("outside_london", re.compile(r"(?i)\boutside\s+london\b")),
-    ("inside_london", re.compile(r"(?i)\b(in|inside)\s+london\b")),
-    ("financial_sector", re.compile(r"(?i)\bfinancial\s+services\b")),
-)
-_CONDITIONAL_QUALIFIER_RE = re.compile(
-    r"(?i)\b("
-    r"transitional|in\s+some\s+cases|for\s+those\s+who|unless|except|"
-    r"reduced\s+rate|lower\s+(?:requirements?|going\s+rate|threshold)|"
-    r"discount|subject\s+to|if\s+(?:you|the\s+applicant)|"
-    r"apply\s+only\s+to|applies\s+only\s+to|only\s+for\s+|only\s+if\s+|"
-    r"only\s+when\s+|only\s+to\s+applications|only\s+before\s+"
-    r")\b"
-)
+# Re-exported aliases so existing verification helpers keep stable local names.
+_COHORT_SCOPE_PATTERNS = COHORT_SCOPE_PATTERNS
+_CONDITIONAL_QUALIFIER_RE = CONDITIONAL_QUALIFIER_RE
 _UNCONDITIONAL_AMOUNT_EXCLUSIVITY_RE = re.compile(
     r"(?i)\b("
     r"is\s+only|are\s+only|only\s+exactly|is\s+exactly|must\s+always\s+be|"
@@ -938,6 +1104,8 @@ def _source_authority_gate(
                 ClaimVerificationStatus.INSUFFICIENT_EVIDENCE,
                 "eu_level_source_cannot_verify_national_implementation",
             )
+    # Narrow exclusivity / universal truncation gate remains here; broader
+    # truncation + qualifier entailment is handled by assess_claim_qualifier_entailment.
     if any(
         getattr(c, "is_truncated", False) or "…[truncated]" in (c.passage_text or "")
         for c in cited
@@ -1060,6 +1228,23 @@ def verify_material_claims(
             if auth_status is not None:
                 status = auth_status
                 reasons.append(auth_reason or "source_authority_insufficient")
+        if status is None:
+            # Phase 10D.4 strict policy: high-risk claims need human-verified rule evidence.
+            try:
+                from lifepilot.governance.verification_policy import (
+                    strict_mode_blocks_high_risk_claim,
+                )
+
+                blocked, block_reason = strict_mode_blocks_high_risk_claim(
+                    question=question,
+                    claim_text=claim.claim,
+                    evidence=working_evidence,
+                )
+                if blocked:
+                    status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+                    reasons.append(block_reason or "strict_verified_only")
+            except Exception:  # noqa: BLE001
+                pass
         if status is not None:
             pass
         elif should_drop_for_pathway(pathway_result, claim=claim.claim):
@@ -1126,6 +1311,20 @@ def verify_material_claims(
             elif not claim_passage_overlap_ok(claim.claim, passages):
                 status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
                 reasons.append("insufficient_passage_overlap")
+                # Still apply qualifier checks so stripped conditions / inversions
+                # are not retained merely because overlap already failed.
+                q_assess = assess_claim_qualifier_entailment(claim.claim, cited)
+                if q_assess.decision == QualifierDecision.CONTRADICTED:
+                    status = ClaimVerificationStatus.CONTRADICTED
+                    reasons.extend(q_assess.reasons or ["qualifier_conflict"])
+                elif q_assess.decision == QualifierDecision.INSUFFICIENT:
+                    reasons.extend(
+                        q_assess.reasons or ["qualifier_entailment_insufficient"]
+                    )
+                elif q_assess.decision == QualifierDecision.UNCERTAIN:
+                    reasons.extend(
+                        q_assess.reasons or ["qualifier_entailment_uncertain"]
+                    )
             elif not num_diag.supported:
                 status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
                 reasons.append(num_diag.reason)
@@ -1144,6 +1343,24 @@ def verify_material_claims(
                     if conflict:
                         status = ClaimVerificationStatus.CONTRADICTED
                         reasons.append(conflict)
+                    else:
+                        # Phase 10C.3: qualifier / negation / conditional entailment.
+                        q_assess = assess_claim_qualifier_entailment(
+                            claim.claim, cited
+                        )
+                        if q_assess.decision == QualifierDecision.CONTRADICTED:
+                            status = ClaimVerificationStatus.CONTRADICTED
+                            reasons.extend(q_assess.reasons or ["qualifier_conflict"])
+                        elif q_assess.decision == QualifierDecision.INSUFFICIENT:
+                            status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
+                            reasons.extend(
+                                q_assess.reasons or ["qualifier_entailment_insufficient"]
+                            )
+                        elif q_assess.decision == QualifierDecision.UNCERTAIN:
+                            status = ClaimVerificationStatus.TEMPORAL_UNCERTAINTY
+                            reasons.extend(
+                                q_assess.reasons or ["qualifier_entailment_uncertain"]
+                            )
 
         if status is None:
             temporal, t_reason = _temporal_status_for_claim(
@@ -1176,6 +1393,8 @@ def verify_material_claims(
             for c in cited
         )
         high_risk = _is_high_risk_claim(claim.claim, q_cats)
+        corr_item: EvidenceItem | None = None
+        corr_rejections: list[str] = []
         if (
             status is None
             and high_risk
@@ -1183,15 +1402,17 @@ def verify_material_claims(
             and not cites_verified_rule
         ):
             independent_checks += 1
-            corr = find_distinct_corroboration(
+            corr_search = search_distinct_corroboration(
                 claim=claim.claim,
                 cited=cited,
                 all_evidence=working_evidence,
                 pathway_id=pathway_id,
             )
-            if corr is not None:
+            corr_rejections = list(corr_search.rejection_reasons)
+            corr_item = corr_search.item
+            if corr_item is not None:
                 corroboration = IndependentCorroboration.REUSED_RETRIEVAL_DISTINCT_SOURCE
-                reasons.append(f"distinct_source_corroboration:{corr.evidence_id}")
+                reasons.append(f"distinct_source_corroboration:{corr_item.evidence_id}")
             elif (
                 corroborator is not None
                 and external_calls < max(0, max_external_corroborations)
@@ -1208,20 +1429,27 @@ def verify_material_claims(
                         working_evidence.extend(fetched)
                         for e in fetched:
                             by_id[e.evidence_id] = e
-                        corr2 = find_distinct_corroboration(
+                        corr_search2 = search_distinct_corroboration(
                             claim=claim.claim,
                             cited=cited,
                             all_evidence=working_evidence,
                             pathway_id=pathway_id,
                         )
-                        if corr2 is not None:
+                        corr_rejections.extend(corr_search2.rejection_reasons)
+                        corr_item = corr_search2.item
+                        if corr_item is not None:
                             corroboration = IndependentCorroboration.SEPARATE_OFFICIAL
                             reasons.append(
-                                f"separate_official_corroboration:{corr2.evidence_id}"
+                                f"separate_official_corroboration:{corr_item.evidence_id}"
                             )
                         else:
                             corroboration = IndependentCorroboration.UNAVAILABLE
                             reasons.append("separate_official_fetch_unconfirmed")
+                            if corr_rejections:
+                                reasons.append(
+                                    "corroboration_incompatible:"
+                                    + corr_rejections[-1].split(":", 2)[-1][:80]
+                                )
                             status = ClaimVerificationStatus.INSUFFICIENT_EVIDENCE
                     else:
                         corroboration = IndependentCorroboration.UNAVAILABLE
@@ -1250,6 +1478,11 @@ def verify_material_claims(
                         "distinct official passage in this request."
                     )
                 reasons.append("no_distinct_official_corroboration")
+                if corr_rejections:
+                    reasons.append(
+                        "corroboration_candidates_rejected:"
+                        + str(min(len(corr_rejections), 9))
+                    )
 
         if status is None:
             if pathway_result.classification == PathwayApplicability.RELATED_CONTEXT:
@@ -1297,14 +1530,23 @@ def verify_material_claims(
             retained_flag = False
             suppressed.append(claim.claim)
         elif status == ClaimVerificationStatus.INSUFFICIENT_EVIDENCE:
-            # Drop unsupported exact figures, eligibility overclaims, and normative claims
-            # relying solely on statistical datasets, portal stubs, or unimplemented EU sources.
+            # Drop unsupported exact figures, eligibility overclaims, qualifier failures,
+            # and normative claims relying solely on statistical datasets, portal stubs,
+            # or unimplemented EU sources.
+            qualifier_drop = any(
+                r.startswith(_QUALIFIER_DROP_REASON_PREFIXES) for r in reasons
+            )
             drop_insufficient = (
                 _claim_has_material_number(claim.claim)
                 or "eligibility_overclaim_without_verified_personal_facts" in reasons
                 or "statistical_dataset_cannot_verify_normative_requirement" in reasons
                 or "portal_page_cannot_verify_normative_requirement" in reasons
                 or "eu_level_source_cannot_verify_national_implementation" in reasons
+                or qualifier_drop
+                or (
+                    "insufficient_passage_overlap" in reasons
+                    and claim_has_high_risk_legal_assertion(claim.claim)
+                )
             )
             if drop_insufficient:
                 retained_flag = False
@@ -1325,6 +1567,13 @@ def verify_material_claims(
                     gap = (
                         "personal facts and full eligibility conditions required "
                         "before any eligibility conclusion"
+                    )
+                    if gap not in missing:
+                        missing.append(gap)
+                elif qualifier_drop:
+                    gap = (
+                        "full qualifying conditions, exceptions, and scope from the "
+                        "cited official passages"
                     )
                     if gap not in missing:
                         missing.append(gap)
@@ -1358,10 +1607,18 @@ def verify_material_claims(
                 temporal_note = (
                     "Applies only to a restricted applicant cohort; do not treat as a general rule."
                 )
-            elif any("cited_excerpt_truncated" in r for r in reasons):
+            elif any(
+                "cited_excerpt_truncated" in r or "truncated_evidence_may_omit" in r
+                for r in reasons
+            ):
                 temporal_note = (
                     "Cited excerpt is truncated — qualifying conditions or exceptions may lie outside "
                     "this excerpt; do not treat as an exhaustive rule."
+                )
+            elif any("unrecognized_evidence_conditions" in r for r in reasons):
+                temporal_note = (
+                    "Cited passages refer to further conditions that were not fully extracted; "
+                    "do not treat the claim as an exhaustive eligibility rule."
                 )
             elif temporal_period_year is not None and any(
                 "year_only" in r or "period_or_date_clarification" in r for r in reasons
@@ -1387,6 +1644,21 @@ def verify_material_claims(
             qualified.append(claim.claim)
             remaining_uncertainties.append(revised_uncertainty)
 
+        evidence_refs = build_claim_evidence_refs(
+            claim.claim,
+            cited,
+            corroborating=corr_item if retained_flag else None,
+            include_excerpt=True,
+        )
+        provenance_incomplete = any(
+            (not r.excerpt_authenticated and r.excerpt)
+            or "external_evidence_document_id_unavailable" in r.provenance_limitations
+            or not r.evidence_id
+            for r in evidence_refs
+        )
+        if not cited:
+            provenance_incomplete = True
+
         outcome = ClaimVerificationOutcome(
             claim=claim.claim,
             evidence_ids=[c.evidence_id for c in cited],
@@ -1396,6 +1668,12 @@ def verify_material_claims(
             revised_uncertainty=revised_uncertainty,
             retained=retained_flag,
             independent_corroboration=corroboration,
+            corroborating_evidence_id=(
+                corr_item.evidence_id if corr_item is not None and retained_flag else None
+            ),
+            evidence_refs=evidence_refs if retained_flag else [],
+            provenance_incomplete=bool(provenance_incomplete and retained_flag),
+            corroboration_rejection_reasons=corr_rejections[:12],
         )
         outcomes.append(outcome)
         if retained_flag:

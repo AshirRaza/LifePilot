@@ -623,8 +623,21 @@ def _seed_controlled_dataset(session: Session) -> dict:
             reviewed_at=now,
         ),
     ]
+    # Insert as unverified first (10D.4 trigger); then promote via synthetic authority.
+    for rule in rules:
+        if rule.verification_status == 'human_verified':
+            rule.verification_status = 'unverified'
+            rule.review_status = 'unreviewed'
+            rule.reviewed_by = None
+            rule.reviewed_at = None
     session.add_all(rules)
     session.flush()
+    from lifepilot.governance.synthetic_authority import ensure_synthetic_human_authority
+    for rule in rules:
+        if rule.rule_key != 'syn_gb_sw.unreviewed_draft':
+            ensure_synthetic_human_authority(
+                session, rule, actor_id='acceptance_reviewer'
+            )
 
     return {
         "embedder": fake_emb,

@@ -17,6 +17,12 @@ from lifepilot.agent.pathway_applicability import (
     normalize_numeric_literal,
     should_drop_for_pathway,
 )
+from lifepilot.agent.qualifiers import (
+    QualifierDecision,
+    assess_claim_qualifier_entailment,
+    claim_has_high_risk_legal_assertion,
+    prose_preserves_material_qualifiers,
+)
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
 # Conservative overlap: claim tokens should appear in cited passages.
@@ -166,7 +172,9 @@ _TEMPORAL_OR_COHORT_QUALIFIER_RE = re.compile(
     r"transitional|cohort|before\s+\d|until\s+\d|after\s+\d|from\s+\d|"
     r"effective\s+(?:from|on)|unless|only\s+(?:if|for|when|to|before|until)|"
     r"under\s+\d+|over\s+\d+|phd|postdoc|new\s+entrant|"
-    r"inside\s+london|outside\s+london|continually\s+held|previously|formerly"
+    r"inside\s+london|outside\s+london|continually\s+held|previously|formerly|"
+    r"except|subject\s+to|provided\s+that|at\s+least|at\s+most|must\s+not|"
+    r"exempt|ineligible|prohibited|do\s+not\s+need"
     r")\b"
 )
 
@@ -175,7 +183,7 @@ def _prose_preserves_temporal_cohort_qualifiers(
     retained: list[str],
     kept: list[AnswerClaim],
 ) -> bool:
-    """True only if retained raw prose retains all temporal/cohort cues & uncertainties."""
+    """True only if retained raw prose retains temporal/cohort/conditional cues."""
     if any(c.uncertainty for c in kept):
         return False
     prose_lower = " ".join(retained).lower()
@@ -184,7 +192,25 @@ def _prose_preserves_temporal_cohort_qualifiers(
             cue = m.group(0).lower().strip()
             if cue not in prose_lower:
                 return False
+    if not prose_preserves_material_qualifiers(
+        retained, [c.claim for c in kept]
+    ):
+        return False
     return True
+
+
+def _should_force_claim_rebuild(kept: list[AnswerClaim]) -> bool:
+    """High-risk legal assertions prefer deterministic claim rendering."""
+    high_risk = [c for c in kept if claim_has_high_risk_legal_assertion(c.claim)]
+    if len(high_risk) >= 2:
+        return True
+    for c in high_risk:
+        if re.search(
+            r"(?i)\b(unless|except|only\s+if|subject\s+to|provided\s+that|if\s+they)\b",
+            c.claim,
+        ):
+            return True
+    return False
 
 
 def compose_grounded_answer_text(
@@ -268,8 +294,35 @@ def compose_grounded_answer_text(
             continue
         retained.append(sentence)
 
-    force_rebuild = bool(suppressed_claims) or not _prose_preserves_temporal_cohort_qualifiers(
-        retained, kept
+    # Drop retained sentences that invent combined eligibility from multiple claims
+    # without belonging to any single claim's qualifier scope.
+    if len(kept) >= 2:
+        filtered: list[str] = []
+        for sentence in retained:
+            if _affirmative_eligibility(sentence):
+                continue
+            # A sentence that asserts eligibility/requirement must overlap one claim well,
+            # not merely the union blob.
+            st = _tokens(sentence)
+            if not st:
+                continue
+            best = 0.0
+            for c in kept:
+                ct = _tokens(c.claim)
+                ov = st & ct
+                best = max(best, len(ov) / max(1, len(st)))
+            if (
+                claim_has_high_risk_legal_assertion(sentence)
+                and best < _SENTENCE_CLAIM_OVERLAP_RATIO
+            ):
+                continue
+            filtered.append(sentence)
+        retained = filtered
+
+    force_rebuild = (
+        bool(suppressed_claims)
+        or not _prose_preserves_temporal_cohort_qualifiers(retained, kept)
+        or _should_force_claim_rebuild(kept)
     )
     rebuilt_from_claims = False
     if not force_rebuild and len(retained) >= 1 and sum(len(s) for s in retained) >= 60:
@@ -368,6 +421,25 @@ def validate_and_ground_answer(
             dropped += 1
             continue
 
+        # Defense-in-depth: qualifier / negation / conditional checks before keep.
+        q_assess = assess_claim_qualifier_entailment(claim.claim, cited)
+        if q_assess.decision == QualifierDecision.CONTRADICTED:
+            warnings.append(
+                "dropped_claim:qualifier_conflict:"
+                + ",".join((q_assess.reasons or ["qualifier_conflict"])[:2])
+            )
+            suppressed_texts.append(claim.claim)
+            dropped += 1
+            continue
+        if q_assess.decision == QualifierDecision.INSUFFICIENT:
+            warnings.append(
+                "dropped_claim:qualifier_insufficient:"
+                + ",".join((q_assess.reasons or ["qualifier_insufficient"])[:2])
+            )
+            suppressed_texts.append(claim.claim)
+            dropped += 1
+            continue
+
         pathway_result = classify_pathway_applicability(
             claim=claim.claim,
             cited=cited,
@@ -384,6 +456,15 @@ def validate_and_ground_answer(
             continue
 
         uncertainty = claim.uncertainty
+        if q_assess.decision == QualifierDecision.UNCERTAIN and not uncertainty:
+            uncertainty = (
+                "Cited excerpt or conditions may be incomplete; "
+                "do not treat as an exhaustive eligibility rule."
+            )
+            warnings.append(
+                "qualified_claim:qualifier_uncertain:"
+                + ",".join((q_assess.reasons or ["qualifier_uncertain"])[:2])
+            )
         if (
             pathway_result.classification.value == "related_context"
             and pathway_id

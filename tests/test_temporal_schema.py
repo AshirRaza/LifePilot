@@ -566,7 +566,7 @@ def test_unsupported_verification_defaults_and_audit_guard(db_session: Session):
     assert rule.verification_status == "unverified"
 
     # human_verified without reviewer/timestamp/approved/version rejected.
-    with pytest.raises(IntegrityError):
+    with pytest.raises((IntegrityError, DBAPIError)):
         with db_session.begin_nested():
             db_session.add(
                 _make_rule(
@@ -580,7 +580,7 @@ def test_unsupported_verification_defaults_and_audit_guard(db_session: Session):
             )
             db_session.flush()
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises((IntegrityError, DBAPIError)):
         with db_session.begin_nested():
             db_session.add(
                 _make_rule(
@@ -595,18 +595,33 @@ def test_unsupported_verification_defaults_and_audit_guard(db_session: Session):
             )
             db_session.flush()
 
-    # Complete audit metadata + pinned version succeeds.
+    # Complete approval requires linked review event (Phase 10D.4); flags alone fail.
+    with pytest.raises((IntegrityError, DBAPIError)):
+        with db_session.begin_nested():
+            orphan_hv = _make_rule(
+                g,
+                rule_key="xx_route.orphan_hv",
+                verification_status="human_verified",
+                review_status="approved",
+                reviewed_by="legal_reviewer_1",
+                reviewed_at=datetime.now(timezone.utc),
+                verification_notes="Synthetic audit-complete but unlinked.",
+            )
+            db_session.add(orphan_hv)
+            db_session.flush()
+
+    from lifepilot.governance.synthetic_authority import ensure_synthetic_human_authority
+
     good_hv = _make_rule(
         g,
         rule_key="xx_route.good_hv",
-        verification_status="human_verified",
-        review_status="approved",
-        reviewed_by="legal_reviewer_1",
-        reviewed_at=datetime.now(timezone.utc),
-        verification_notes="Synthetic audit-complete approval.",
+        verification_notes="Synthetic linked approval.",
     )
     db_session.add(good_hv)
     db_session.flush()
+    ensure_synthetic_human_authority(
+        db_session, good_hv, actor_id="legal_reviewer_1"
+    )
     assert good_hv.verification_status == "human_verified"
 
 

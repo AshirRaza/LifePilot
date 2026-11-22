@@ -123,6 +123,12 @@ def load_review_queue(path: str | None = None) -> dict[str, Any]:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def reset_freshness_and_review_caches() -> None:
+    """Clear policy/queue caches after maintenance updates governance artifacts."""
+    load_freshness_policy.cache_clear()
+    load_review_queue.cache_clear()
+
+
 def detect_high_risk_categories(question: str) -> list[str]:
     text = question or ""
     found: list[str] = []

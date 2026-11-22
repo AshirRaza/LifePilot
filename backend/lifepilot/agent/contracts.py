@@ -186,6 +186,7 @@ class AgentResponse(BaseModel):
     resolved_reference_date: date | None = None
     temporal_mode: str | None = None
     temporal_outcome: str | None = None
+    legal_verification_policy: str | None = None
 
 
 def validate_agent_request(

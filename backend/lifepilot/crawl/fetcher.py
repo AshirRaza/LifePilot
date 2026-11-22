@@ -358,6 +358,8 @@ def _persist_version(
 
     write_bytes_atomic(abs_path, body)
     try:
+        previous_current = get_current_version(session, document.id)
+        previous_version_id = previous_current.id if previous_current else None
         version = DocumentVersion(
             document_id=document.id,
             fetched_via_source_id=source.id,
@@ -380,6 +382,19 @@ def _persist_version(
         session.flush()
         set_current_version(session, version)
         session.flush()
+        # Phase 10D.4: same-transaction fail-closed guard for pinned reviews.
+        # Raises → caller deletes bytes and rolls back (no silent stale authority).
+        from lifepilot.governance.ingest_version_guard import (
+            enforce_review_pins_on_new_current,
+        )
+
+        enforce_review_pins_on_new_current(
+            session,
+            previous_version_id=previous_version_id,
+            new_version_id=version.id,
+            document_id=document.id,
+            content_hashes_equal=False,
+        )
     except Exception:
         delete_quiet(abs_path)
         raise

@@ -36,6 +36,24 @@ from lifepilot.db.base import Base  # noqa: E402
 from lifepilot.db.session import get_engine  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_pending_material_changes(tmp_path_factory, monkeypatch):
+    """Keep pending-change JSON out of the shared data/runs path during tests.
+
+    Truncated test DB IDs restart at 1; a durable pending file from prior runs
+    can otherwise falsely block LegalRule authority checks.
+    """
+    path = tmp_path_factory.mktemp("pending") / "pending_material_changes.json"
+    path.write_text(
+        '{"registry_id":"pending_material_changes_v1","items":[]}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "lifepilot.maintenance.pending_changes.DEFAULT_PENDING_PATH",
+        path,
+    )
+
+
 @pytest.fixture(scope="session")
 def test_database_url() -> str:
     """Create (if missing), migrate and reset the isolated test database."""

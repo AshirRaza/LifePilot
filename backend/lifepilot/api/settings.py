@@ -40,6 +40,9 @@ class ApiSettings:
     max_request_bytes: int = 32_768
     include_evidence_in_response: bool = False
     log_questions: bool = False
+    # Legal review API is off until a trusted human auth provider is configured.
+    legal_review_api_enabled: bool = False
+    legal_review_auth_mode: str = "disabled"
 
     @property
     def is_production(self) -> bool:
@@ -57,6 +60,13 @@ def get_api_settings() -> ApiSettings:
     if require_auth and not keys and env in {"production", "prod"}:
         # Keep settings constructible for tests; app startup validates separately.
         pass
+    from lifepilot.governance.reviewer_auth import resolve_auth_mode
+
+    auth_mode = resolve_auth_mode()
+    # No production human IdP yet — keep legal-review HTTP disabled in prod.
+    api_enabled = _env_bool("LIFEPILOT_LEGAL_REVIEW_API_ENABLED", False)
+    if env in {"production", "prod"}:
+        api_enabled = False
     return ApiSettings(
         environment=env or "development",
         require_auth=require_auth,
@@ -68,6 +78,8 @@ def get_api_settings() -> ApiSettings:
             "LIFEPILOT_API_INCLUDE_EVIDENCE", False
         ),
         log_questions=_env_bool("LIFEPILOT_API_LOG_QUESTIONS", False),
+        legal_review_api_enabled=api_enabled,
+        legal_review_auth_mode=auth_mode,
     )
 
 

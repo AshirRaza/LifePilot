@@ -328,8 +328,36 @@ def run_knowledge_maintenance(
                     ),
                 }
             )
+            # Phase 10D.3: invalidate review items pinned to the previous version.
+            inv_count = 0
+            try:
+                from lifepilot.governance.source_change import (
+                    process_source_version_change,
+                )
+
+                inv = process_source_version_change(
+                    session,
+                    previous_version_id=prev_ver.id if prev_ver else None,
+                    new_version_id=int(fetch.version_id),
+                    change_class=change,
+                    content_hashes_equal=False,
+                    dry_run=False,
+                )
+                inv_count = inv.invalidated_count
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "maintenance.review_invalidation_failed doc=%s", doc.id
+                )
+                row.message = (
+                    "material/uncertain change queued; previous version kept "
+                    f"current; review_invalidation_error:{exc.__class__.__name__}"
+                )
+            else:
+                row.message = (
+                    "material/uncertain change queued; previous version kept "
+                    f"current; review_items_invalidated={inv_count}"
+                )
             row.status = "pending_review"
-            row.message = "material/uncertain change queued; previous version kept current"
             results.append(row)
             continue
 

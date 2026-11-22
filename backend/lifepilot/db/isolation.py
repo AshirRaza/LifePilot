@@ -183,6 +183,8 @@ def clear_registry_tables(session: Session) -> None:
     must be cleared first.
     """
     from lifepilot.db.models import (
+        PLANNED_EMBEDDING_DIMENSIONS,
+        PLANNED_EMBEDDING_MODEL_ID,
         Authority,
         DiscoveryFrontier,
         Document,
@@ -194,25 +196,54 @@ def clear_registry_tables(session: Session) -> None:
         DocumentVersion,
         EmbeddingModel,
         Jurisdiction,
+        LegalReviewEvent,
+        LegalReviewItem,
         LegalRule,
         Source,
     )
 
     assert_connected_to_test_database(session)
-    for model in (
-        LegalRule,
-        DocumentChunkEmbedding,
-        DocumentChunk,
-        EmbeddingModel,
-        DiscoveryFrontier,
-        DocumentContentComparison,
-        DocumentExtraction,
-        DocumentVersion,
-        DocumentJurisdiction,
-        Document,
-        Source,
-        Authority,
-        Jurisdiction,
-    ):
-        session.execute(delete(model))
-    session.flush()
+    # Append-only triggers on legal_review_events intentionally block DELETE.
+    # Test cleanup temporarily disables USER triggers on the test DB only.
+    session.execute(
+        text("ALTER TABLE IF EXISTS legal_review_events DISABLE TRIGGER USER")
+    )
+    try:
+        for model in (
+            LegalReviewEvent,
+            LegalReviewItem,
+            LegalRule,
+            DocumentChunkEmbedding,
+            DocumentChunk,
+            EmbeddingModel,
+            DiscoveryFrontier,
+            DocumentContentComparison,
+            DocumentExtraction,
+            DocumentVersion,
+            DocumentJurisdiction,
+            Document,
+            Source,
+            Authority,
+            Jurisdiction,
+        ):
+            session.execute(delete(model))
+        session.flush()
+        # Restore planned embedding model seed (wiped above) for RAG tests.
+        session.execute(
+            text(
+                """
+                INSERT INTO embedding_models
+                    (id, display_name, dimensions, distance_metric, notes)
+                VALUES
+                    (:id, 'Multilingual E5 Small', :dims, 'cosine',
+                     'Test DB seed after clear_registry_tables')
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {"id": PLANNED_EMBEDDING_MODEL_ID, "dims": PLANNED_EMBEDDING_DIMENSIONS},
+        )
+        session.flush()
+    finally:
+        session.execute(
+            text("ALTER TABLE IF EXISTS legal_review_events ENABLE TRIGGER USER")
+        )

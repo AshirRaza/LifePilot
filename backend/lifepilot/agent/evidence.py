@@ -370,13 +370,28 @@ def evidence_from_external_item(
     )
 
 
-def evidence_from_legal_rule(rule: Any) -> EvidenceItem:
-    """Map a human-verified LegalRule row into the shared evidence contract."""
+def evidence_from_legal_rule(rule: Any, session: Any | None = None) -> EvidenceItem:
+    """Map a human-verified LegalRule row into the shared evidence contract.
+
+    When ``session`` is provided, Phase 10D.4 approval-invariant validation is
+    required — standalone DB flags cannot upgrade unapproved rules.
+    """
     if (
         getattr(rule, "review_status", None) != "approved"
         or getattr(rule, "verification_status", None) != "human_verified"
     ):
         raise ValueError("Only approved and human_verified LegalRule rows may become curated_rule evidence")
+    if session is not None:
+        from lifepilot.governance.approval_invariant import (
+            validate_legal_rule_human_authority,
+        )
+
+        check = validate_legal_rule_human_authority(session, rule)
+        if not check.ok:
+            raise ValueError(
+                "LegalRule failed approval invariant: "
+                + ",".join(check.reasons)
+            )
 
     parts = [rule.rule_summary.strip()]
     if rule.numeric_value is not None:

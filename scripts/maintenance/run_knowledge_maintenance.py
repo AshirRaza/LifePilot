@@ -121,29 +121,27 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
 
-    # Lightweight freshness alert artifact for operators.
-    failed = [
-        i
-        for i in (payload.get("items") or [])
-        if (i.get("status") or "") in {"failed", "error", "fetch_failed"}
-    ]
-    pending = [
-        i
-        for i in (payload.get("items") or [])
-        if (i.get("change_class") or "").startswith("material")
-        or (i.get("status") or "") == "queued_for_review"
-    ]
-    alerts = {
-        "generated_at": payload["generated_at"],
-        "overdue_sources": failed,
-        "pending_material_changes": pending,
-        "counts": payload.get("counts"),
-        "dry_run": payload.get("dry_run"),
-    }
+    # Freshness alert artifact for operators / readiness probes.
+    # Must match maintenance pipeline statuses (pending_review) and change
+    # classes (potentially_material, uncertain) — not the legacy
+    # startswith("material") / queued_for_review filters.
+    from lifepilot.governance.maintenance_alerts import build_freshness_alerts
+    from lifepilot.maintenance.pending_changes import load_pending_changes
+
+    pending_registry = load_pending_changes().get("items") or []
+    alerts = build_freshness_alerts(
+        report_items=list(payload.get("items") or []),
+        pending_registry_items=list(pending_registry),
+        counts=payload.get("counts"),
+        dry_run=payload.get("dry_run"),
+        generated_at=payload["generated_at"],
+    )
     DEFAULT_FRESHNESS_ALERTS.parent.mkdir(parents=True, exist_ok=True)
     DEFAULT_FRESHNESS_ALERTS.write_text(
         json.dumps(alerts, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+    failed = list(alerts.get("overdue_sources") or [])
+    pending = list(alerts.get("pending_material_changes") or [])
 
     if args.json:
         print(json.dumps(payload, indent=2))

@@ -194,6 +194,62 @@ LEGAL_RULE_VERIFICATION_STATUSES = (
     "potentially_outdated",
 )
 
+# ---------------------------------------------------------------------------
+# Phase 10D.1 — Persistent legal review governance
+# ---------------------------------------------------------------------------
+
+LEGAL_REVIEW_SUBJECT_TYPES = (
+    "legal_rule",
+    "claim_evidence",
+    "high_risk_queue_item",
+)
+
+LEGAL_REVIEW_WORKFLOW_STATES = (
+    "pending",
+    "assigned",
+    "in_review",
+    "approved",
+    "rejected",
+    "changes_requested",
+    "reopened",
+    "invalidated",
+    "superseded",
+)
+
+LEGAL_REVIEW_EVENT_TYPES = (
+    "submitted_for_review",
+    "assigned",
+    "review_started",
+    "approved",
+    "rejected",
+    "changes_requested",
+    "reopened",
+    "approval_invalidated",
+    "source_version_changed",
+    "superseded",
+    "administrative_correction",
+)
+
+LEGAL_REVIEW_ACTOR_KINDS = (
+    "human_reviewer",
+    "service",
+    "system",
+)
+
+LEGAL_REVIEW_RISK_CLASSES = (
+    "critical",
+    "high",
+    "medium",
+    "low",
+)
+
+LEGAL_REVIEW_PRIORITIES = (
+    "p0",
+    "p1",
+    "p2",
+    "p3",
+)
+
 
 class Jurisdiction(Base):
     __tablename__ = "jurisdictions"
@@ -1167,3 +1223,247 @@ class LegalRule(Base):
         remote_side="LegalRule.id",
         foreign_keys=[supersedes_rule_id],
     )
+
+
+class LegalReviewItem(Base):
+    """Persistent human-review work item (Phase 10D.1).
+
+    Fail-closed: creating a row never implies human verification of a LegalRule
+    or claim. Approval transitions that mutate LegalRule.verification_status are
+    deferred to later 10D phases; this table only records review workflow state.
+    """
+
+    __tablename__ = "legal_review_items"
+    __table_args__ = (
+        CheckConstraint(
+            "subject_type IN ("
+            + ", ".join(f"'{t}'" for t in LEGAL_REVIEW_SUBJECT_TYPES)
+            + ")",
+            name="ck_legal_review_items_subject_type",
+        ),
+        CheckConstraint(
+            "workflow_state IN ("
+            + ", ".join(f"'{s}'" for s in LEGAL_REVIEW_WORKFLOW_STATES)
+            + ")",
+            name="ck_legal_review_items_workflow_state",
+        ),
+        CheckConstraint(
+            "risk_class IN ("
+            + ", ".join(f"'{r}'" for r in LEGAL_REVIEW_RISK_CLASSES)
+            + ")",
+            name="ck_legal_review_items_risk_class",
+        ),
+        CheckConstraint(
+            "priority IN ("
+            + ", ".join(f"'{p}'" for p in LEGAL_REVIEW_PRIORITIES)
+            + ")",
+            name="ck_legal_review_items_priority",
+        ),
+        CheckConstraint(
+            "length(trim(review_reason)) > 0",
+            name="ck_legal_review_items_review_reason_nonempty",
+        ),
+        # Must pin examined evidence somehow.
+        CheckConstraint(
+            "document_version_id IS NOT NULL OR ("
+            "evidence_fingerprint IS NOT NULL AND length(trim(evidence_fingerprint)) > 0"
+            ")",
+            name="ck_legal_review_items_requires_evidence_pin",
+        ),
+        # legal_rule subjects must reference a LegalRule and pin a DocumentVersion.
+        CheckConstraint(
+            "subject_type <> 'legal_rule' OR ("
+            "legal_rule_id IS NOT NULL AND document_version_id IS NOT NULL"
+            ")",
+            name="ck_legal_review_items_legal_rule_requires_rule_and_version",
+        ),
+        CheckConstraint(
+            "assigned_actor_kind IS NULL OR assigned_actor_kind IN ("
+            + ", ".join(f"'{k}'" for k in LEGAL_REVIEW_ACTOR_KINDS)
+            + ")",
+            name="ck_legal_review_items_assigned_actor_kind",
+        ),
+        CheckConstraint(
+            "(assigned_actor_id IS NULL AND assigned_actor_kind IS NULL) OR ("
+            "assigned_actor_id IS NOT NULL AND length(trim(assigned_actor_id)) > 0 "
+            "AND assigned_actor_kind IS NOT NULL"
+            ")",
+            name="ck_legal_review_items_assigned_actor_pair",
+        ),
+        CheckConstraint(
+            "row_version >= 1",
+            name="ck_legal_review_items_row_version_positive",
+        ),
+        Index("ix_legal_review_items_workflow_state", "workflow_state"),
+        Index("ix_legal_review_items_jurisdiction_id", "jurisdiction_id"),
+        Index("ix_legal_review_items_pathway_id", "pathway_id"),
+        Index("ix_legal_review_items_legal_rule_id", "legal_rule_id"),
+        Index("ix_legal_review_items_document_version_id", "document_version_id"),
+        Index("ix_legal_review_items_priority_state", "priority", "workflow_state"),
+        Index("ix_legal_review_items_assigned_actor_id", "assigned_actor_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    public_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        unique=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    subject_type: Mapped[str] = mapped_column(Text, nullable=False)
+    legal_rule_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("legal_rules.id"), nullable=True
+    )
+    # Opaque subject key for claim_evidence / high_risk_queue_item bridges.
+    subject_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    jurisdiction_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jurisdictions.id"), nullable=False
+    )
+    pathway_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requirement_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risk_class: Mapped[str] = mapped_column(
+        Text, nullable=False, default="high", server_default=text("'high'")
+    )
+    workflow_state: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending", server_default=text("'pending'")
+    )
+    review_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[str] = mapped_column(
+        Text, nullable=False, default="p1", server_default=text("'p1'")
+    )
+
+    source_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("sources.id"), nullable=True
+    )
+    document_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("documents.id"), nullable=True
+    )
+    document_version_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=True
+    )
+    evidence_fingerprint: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_effective_from: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    reviewed_effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    reviewed_cohort_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    assigned_actor_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    assigned_actor_kind: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_deadline_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reassessment_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    invalidated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    invalidation_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    current_approved_event_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True
+    )
+
+    # Optimistic concurrency for append/update of workflow state.
+    row_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    jurisdiction: Mapped[Jurisdiction] = relationship()
+    legal_rule: Mapped[Optional[LegalRule]] = relationship()
+    source: Mapped[Optional[Source]] = relationship()
+    document: Mapped[Optional[Document]] = relationship()
+    document_version: Mapped[Optional[DocumentVersion]] = relationship()
+    events: Mapped[list["LegalReviewEvent"]] = relationship(
+        back_populates="review_item",
+        order_by="LegalReviewEvent.id",
+        cascade="save-update",
+    )
+
+
+class LegalReviewEvent(Base):
+    """Append-only review history row (Phase 10D.1).
+
+    Application code must only INSERT. DB triggers reject UPDATE/DELETE.
+    Administrative recovery requires explicit DBA procedures (documented in
+    Phase 10D.1 report), not silent application rewrites.
+    """
+
+    __tablename__ = "legal_review_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ("
+            + ", ".join(f"'{t}'" for t in LEGAL_REVIEW_EVENT_TYPES)
+            + ")",
+            name="ck_legal_review_events_event_type",
+        ),
+        CheckConstraint(
+            "actor_kind IN ("
+            + ", ".join(f"'{k}'" for k in LEGAL_REVIEW_ACTOR_KINDS)
+            + ")",
+            name="ck_legal_review_events_actor_kind",
+        ),
+        CheckConstraint(
+            "length(trim(actor_id)) > 0",
+            name="ck_legal_review_events_actor_id_nonempty",
+        ),
+        CheckConstraint(
+            "from_workflow_state IS NULL OR from_workflow_state IN ("
+            + ", ".join(f"'{s}'" for s in LEGAL_REVIEW_WORKFLOW_STATES)
+            + ")",
+            name="ck_legal_review_events_from_state",
+        ),
+        CheckConstraint(
+            "to_workflow_state IN ("
+            + ", ".join(f"'{s}'" for s in LEGAL_REVIEW_WORKFLOW_STATES)
+            + ")",
+            name="ck_legal_review_events_to_state",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata) = 'object'",
+            name="ck_legal_review_events_metadata_object",
+        ),
+        Index("ix_legal_review_events_review_item_id", "review_item_id"),
+        Index("ix_legal_review_events_event_type", "event_type"),
+        Index("ix_legal_review_events_occurred_at", "occurred_at"),
+        Index("ix_legal_review_events_actor_id", "actor_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    review_item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("legal_review_items.id"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    from_workflow_state: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    to_workflow_state: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_fingerprint: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    document_version_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("document_versions.id"), nullable=True
+    )
+    event_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    review_item: Mapped[LegalReviewItem] = relationship(back_populates="events")
+    document_version: Mapped[Optional[DocumentVersion]] = relationship()

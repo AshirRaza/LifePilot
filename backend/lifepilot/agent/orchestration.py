@@ -564,11 +564,36 @@ class EvidenceOrchestrator:
         # Normalize (curated reviewed rules first, then internal passages, then external).
         norm_started = time.perf_counter()
         evidence: list[EvidenceItem] = []
-        for rule in rule_lookup.matched_rules:
+        if rule_lookup.matched_rules:
             try:
-                evidence.append(evidence_from_legal_rule(rule))
-            except ValueError:
-                continue
+                from lifepilot.db.models import LegalRule as _LegalRule
+
+                _rule_factory = self._session_factory_resolved()
+                with _rule_factory() as _rule_session:
+                    for rule in rule_lookup.matched_rules:
+                        try:
+                            # Re-load in this session so detached lookup rows still
+                            # pass Phase 10D.4 approval-invariant validation.
+                            rule_id = getattr(rule, "id", None)
+                            fresh = (
+                                _rule_session.get(_LegalRule, rule_id)
+                                if rule_id is not None
+                                else rule
+                            )
+                            if fresh is None:
+                                continue
+                            evidence.append(
+                                evidence_from_legal_rule(
+                                    fresh, session=_rule_session
+                                )
+                            )
+                        except ValueError:
+                            continue
+            except Exception:  # noqa: BLE001
+                # Fail closed: do not emit curated_rule evidence without validation.
+                logger.debug(
+                    "agent.curated_rule_evidence_validation_failed", exc_info=True
+                )
 
         for passage in internal_passages:
             if not _is_substantive(passage.content_text):

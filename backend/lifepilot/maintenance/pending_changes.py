@@ -70,8 +70,19 @@ def pending_uncertainty_reasons(
         if item_pid and not pid:
             continue
         status = (item.get("status") or "").lower()
-        if status in {"pending_review", "potentially_material", "uncertain"}:
-            reasons.append(
-                f"pending_material_change:{item.get('id')}:{status}"
-            )
+        change_class = (item.get("change_class") or "").lower()
+        # Pipeline stores status=pending_review and change_class=potentially_material
+        # (or uncertain). Accept either field so agent uncertainty cannot miss items.
+        if status in {"pending_review", "queued_for_review", "potentially_material", "uncertain"}:
+            label = status
+        elif change_class in {
+            "potentially_material",
+            "uncertain",
+            "confirmed_material",
+            "materiality_unknown",
+        }:
+            label = change_class
+        else:
+            continue
+        reasons.append(f"pending_material_change:{item.get('id')}:{label}")
     return reasons

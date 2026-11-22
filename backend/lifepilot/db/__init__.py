@@ -12,6 +12,8 @@ from lifepilot.db.models import (
     DocumentVersion,
     EmbeddingModel,
     Jurisdiction,
+    LegalReviewEvent,
+    LegalReviewItem,
     LegalRule,
     Source,
 )
@@ -29,6 +31,8 @@ __all__ = [
     "DocumentVersion",
     "EmbeddingModel",
     "Jurisdiction",
+    "LegalReviewEvent",
+    "LegalReviewItem",
     "LegalRule",
     "Source",
     "get_engine",

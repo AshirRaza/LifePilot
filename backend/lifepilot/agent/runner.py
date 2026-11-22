@@ -88,6 +88,8 @@ def _response_from_state(
     if verification is not None and not isinstance(verification, dict):
         verification = None
 
+    from lifepilot.governance.verification_policy import get_legal_verification_policy
+
     return AgentResponse(
         request_id=state.get("request_id") or request.ensure_request_id(),
         status=status,
@@ -120,6 +122,7 @@ def _response_from_state(
         resolved_reference_date=_parse_opt_date(state.get("resolved_reference_date")),
         temporal_mode=state.get("temporal_mode"),
         temporal_outcome=state.get("temporal_outcome"),
+        legal_verification_policy=get_legal_verification_policy().value,
     )
 
 

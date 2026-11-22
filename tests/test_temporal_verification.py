@@ -193,13 +193,24 @@ def _make_rule(g: dict, **overrides) -> LegalRule:
         "document_version_id": g["ver"].id,
         "source_id": g["src"].id,
         "source_url": g["doc"].canonical_url,
-        "review_status": "approved",
-        "verification_status": "human_verified",
-        "reviewed_by": "synthetic_reviewer",
-        "reviewed_at": datetime.now(timezone.utc),
+        "review_status": "unreviewed",
+        "verification_status": "unverified",
+        "reviewed_by": None,
+        "reviewed_at": None,
     }
     payload.update(overrides)
+    if payload.get("verification_status") == "human_verified":
+        payload["verification_status"] = "unverified"
+        payload["review_status"] = "unreviewed"
+        payload["reviewed_by"] = None
+        payload["reviewed_at"] = None
     return LegalRule(**payload)
+
+
+def _authorize_rules(session: Session, rules: list[LegalRule]) -> list[LegalRule]:
+    from lifepilot.governance.synthetic_authority import ensure_synthetic_human_authority
+
+    return [ensure_synthetic_human_authority(session, r) for r in rules]
 
 
 @pytest.fixture()
@@ -480,6 +491,7 @@ def test_reviewed_legal_rule_vs_non_applicable_unreviewed_and_missing_cohort(
     )
     db_session.add_all([applicable_rule, expired_rule, cohort_rule])
     db_session.flush()
+    _authorize_rules(db_session, [applicable_rule, expired_rule, cohort_rule])
 
     ev_app = evidence_from_legal_rule(applicable_rule)
     ev_exp = evidence_from_legal_rule(expired_rule)
@@ -677,6 +689,7 @@ def test_year_only_historical_question_does_not_invent_date_and_detects_multi_pe
     )
     db_session.add_all([r_h1, r_h2])
     db_session.flush()
+    _authorize_rules(db_session, [r_h1, r_h2])
 
     @contextmanager
     def _bound():

@@ -191,6 +191,7 @@ def _seed_doc_with_versions(
 
 
 def _make_verified_rule(g: dict, **overrides) -> LegalRule:
+    """Build a LegalRule. Persist as unverified; call ``_authorize_rules`` after flush."""
     payload = {
         "rule_key": "xx_route.synthetic_threshold",
         "rule_revision": 1,
@@ -217,13 +218,32 @@ def _make_verified_rule(g: dict, **overrides) -> LegalRule:
         "document_version_id": g["versions"][0].id,
         "source_id": g["source"].id,
         "source_url": g["document"].canonical_url,
-        "review_status": "approved",
-        "verification_status": "human_verified",
-        "reviewed_by": "synthetic_reviewer",
-        "reviewed_at": datetime.now(timezone.utc),
+        # Insert-safe defaults; promote via ``_authorize_rules`` (Phase 10D.4).
+        "review_status": "unreviewed",
+        "verification_status": "unverified",
+        "reviewed_by": None,
+        "reviewed_at": None,
     }
     payload.update(overrides)
+    # Strip legacy direct human_verified inserts (trigger + invariant require events).
+    if payload.get("verification_status") == "human_verified":
+        payload["verification_status"] = "unverified"
+        payload["review_status"] = "unreviewed"
+        payload["reviewed_by"] = None
+        payload["reviewed_at"] = None
     return LegalRule(**payload)
+
+
+def _authorize_rules(session: Session, rules: list[LegalRule]) -> list[LegalRule]:
+    from lifepilot.governance.synthetic_authority import ensure_synthetic_human_authority
+
+    out: list[LegalRule] = []
+    for rule in rules:
+        if rule.verification_status == "unverified" and rule.review_status == "unreviewed":
+            out.append(ensure_synthetic_human_authority(session, rule))
+        else:
+            out.append(rule)
+    return out
 
 
 @pytest.fixture()
@@ -535,6 +555,9 @@ def test_legal_rule_boundaries_inclusive_exclusive_and_unknown_dates(db_session:
     )
     db_session.add_all([unknown_rule, partial_rule, bounded_half_open, exclusive_start])
     db_session.flush()
+    _authorize_rules(
+        db_session, [unknown_rule, partial_rule, bounded_half_open, exclusive_start]
+    )
 
     assert rule_applies_on_date(unknown_rule, date(2026, 1, 1))[0] is False
     assert rule_applies_on_date(partial_rule, date(2026, 1, 1))[0] is False
@@ -624,6 +647,9 @@ def test_legal_rule_cohorts_unreviewed_exclusion_and_isolation(db_session: Sessi
         [general_rule, transitional_rule, unreviewed_rule, other_pathway_rule, ie_rule]
     )
     db_session.flush()
+    _authorize_rules(
+        db_session, [general_rule, transitional_rule, other_pathway_rule, ie_rule]
+    )
 
     # Unknown applicant cohort: returns general ONLY, keeps transitional as caveat, excludes unreviewed & other pathways/jurisdictions.
     unknown_cohort = query_reviewed_legal_rules(
@@ -666,6 +692,7 @@ def test_legal_rule_cohorts_unreviewed_exclusion_and_isolation(db_session: Sessi
     )
     db_session.add(only_trans)
     db_session.flush()
+    _authorize_rules(db_session, [only_trans])
     cohort_missing = query_reviewed_legal_rules(
         db_session,
         jurisdiction="GB",
@@ -1026,6 +1053,7 @@ def test_reviewed_legal_rule_orchestration_conflict_and_prompt_budget(
     )
     db_session.add(rule_ok)
     db_session.flush()
+    _authorize_rules(db_session, [rule_ok])
 
     @contextmanager
     def _bound():
@@ -1083,6 +1111,7 @@ def test_reviewed_legal_rule_orchestration_conflict_and_prompt_budget(
     )
     db_session.add(rule_conflict)
     db_session.flush()
+    _authorize_rules(db_session, [rule_conflict])
     res_conf = orch.gather(
         question="What was the salary threshold?",
         jurisdiction="GB",

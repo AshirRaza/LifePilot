@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from lifepilot.api.auth import AuthPrincipal
+from lifepilot.api.legal_review_routes import router as legal_review_router
 from lifepilot.api.rate_limit import answer_concurrency_gate, enforce_rate_limit
 from lifepilot.api.schemas import (
     AnswerRequest,
@@ -26,6 +27,7 @@ from lifepilot.api.settings import (
     get_api_settings,
     reset_api_settings_cache,
 )
+from lifepilot.governance.reviewer_auth import reset_reviewer_auth_provider_cache
 from lifepilot.agent.config import get_agent_config, reset_agent_config_cache
 from lifepilot.agent.contracts import AgentRequest, AgentStatus
 from lifepilot.agent.runner import run_agent
@@ -182,28 +184,68 @@ def _safe_errors(errors: list[str] | None) -> list[str]:
 
 
 def _to_answer_response(resp, *, include_evidence: bool) -> AnswerResponse:
+    from lifepilot.agent.claim_provenance import (
+        project_claim_verification_for_api,
+        project_evidence_item_for_api,
+    )
+    from lifepilot.agent.verification import ClaimVerificationOutcome
+
+    # Backward compatible: ``evidence`` stays null unless INCLUDE_EVIDENCE is on.
+    # Essential verification status is always available via ``verification`` and
+    # additive ``claim_verification`` (excerpts gated by the same flag).
     evidence_payload = None
+    evidence_detail: str = "none"
     if include_evidence and resp.evidence:
+        evidence_detail = "detailed"
         evidence_payload = [
-            {
-                "evidence_id": e.evidence_id,
-                "source_type": e.source_type.value,
-                "verification_state": e.verification_state.value,
-                "source_url": e.source_url,
-                "jurisdiction": e.jurisdiction,
-            }
-            for e in resp.evidence
+            project_evidence_item_for_api(e, detailed=True) for e in resp.evidence
         ]
+
+    claim_verification = None
+    if isinstance(resp.verification, dict):
+        raw_outcomes = resp.verification.get("claim_outcomes") or []
+        outcomes: list[ClaimVerificationOutcome] = []
+        for row in raw_outcomes:
+            try:
+                if isinstance(row, ClaimVerificationOutcome):
+                    outcomes.append(row)
+                elif isinstance(row, dict):
+                    outcomes.append(ClaimVerificationOutcome.model_validate(row))
+            except Exception:  # noqa: BLE001
+                continue
+        claim_verification = project_claim_verification_for_api(
+            outcomes,
+            include_excerpts=bool(include_evidence),
+            retained_only=True,
+        )
+
+    # Defense-in-depth: never re-inject suppressed claim texts into claims list.
+    retained_claims = [c.model_dump(mode="json") for c in (resp.claims or [])]
+    if claim_verification is not None:
+        retained_texts = {(c.get("claim") or "").strip() for c in retained_claims}
+        for view in claim_verification:
+            text = (view.get("claim") or "").strip()
+            if text and text not in retained_texts and not view.get("retained"):
+                # Should not happen with retained_only=True; skip defensively.
+                continue
+
+    from lifepilot.governance.verification_policy import get_legal_verification_policy
+
+    policy = getattr(resp, "legal_verification_policy", None) or (
+        get_legal_verification_policy().value
+    )
+
     return AnswerResponse(
         request_id=resp.request_id,
         status=resp.status.value,
         answer=resp.answer,
-        claims=[c.model_dump(mode="json") for c in (resp.claims or [])],
+        claims=retained_claims,
         missing_information=list(resp.missing_information or []),
         warnings=[redact_secrets(w) for w in (resp.warnings or [])],
         errors=_safe_errors(resp.errors),
         retrieval_decision=resp.retrieval_decision,
         verification=resp.verification,
+        claim_verification=claim_verification,
         timing=resp.timing.model_dump(mode="json") if resp.timing else {},
         usage=resp.usage.model_dump(mode="json") if resp.usage else None,
         jurisdiction=resp.jurisdiction,
@@ -214,12 +256,15 @@ def _to_answer_response(resp, *, include_evidence: bool) -> AnswerResponse:
         temporal_outcome=resp.temporal_outcome,
         evidence_count=len(resp.evidence or []),
         evidence=evidence_payload,
+        evidence_detail=evidence_detail,  # type: ignore[arg-type]
+        legal_verification_policy=policy,
     )
 
 
 def create_app() -> FastAPI:
     reset_api_settings_cache()
     reset_agent_config_cache()
+    reset_reviewer_auth_provider_cache()
     settings = get_api_settings()
 
     @asynccontextmanager
@@ -373,6 +418,8 @@ def create_app() -> FastAPI:
             (out.timing or {}).get("verification_ms"),
         )
         return out
+
+    app.include_router(legal_review_router)
 
     return app
 
